@@ -3,19 +3,22 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -93,6 +96,7 @@ manual_cancel_pending_events(Service_t * service_p)
 static void
 manual_inactive(Service_t * service_p)
 {
+    manual_cancel_pending_events(service_p);
     service_remove_address(service_p);
     service_publish_failure(service_p, ipconfig_status_media_inactive_e,
 			    NULL);
@@ -277,6 +281,37 @@ manual_thread(Service_t * service_p, IFEventID_t evid, void * event_data)
 	      /* publish new mask */
 	      service_publish_success(service_p, NULL, 0);
 	  }
+	  break;
+      }
+      case IFEventID_arp_collision_e: {
+	  arp_collision_data_t *	arpc;
+	  char				msg[128];
+
+	  arpc = (arp_collision_data_t *)event_data;
+
+	  if (manual == NULL) {
+	      return (ipconfig_status_internal_error_e);
+	  }
+	  if (arpc->ip_addr.s_addr != manual->our_ip.s_addr) {
+	      break;
+	  }
+	  snprintf(msg, sizeof(msg), 
+		   IP_FORMAT " in use by " EA_FORMAT,
+		   IP_LIST(&arpc->ip_addr), 
+		   EA_LIST(arpc->hwaddr));
+	  service_report_conflict(service_p,
+				  &arpc->ip_addr,
+				  arpc->hwaddr,
+				  NULL);
+	  my_log(LOG_ERR, "MANUAL %s: %s", 
+		 if_name(if_p), msg);
+#if 0
+	  service_remove_address(service_p);
+	  service_publish_failure(service_p, 
+				  ipconfig_status_address_in_use_e,
+				  msg);
+	  manual_cancel_pending_events(service_p);
+#endif 0
 	  break;
       }
       case IFEventID_media_e: {
