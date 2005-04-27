@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -59,10 +57,6 @@
 
 extern void
 my_log(int priority, const char *message, ...);
-
-static char link_broadcast[8] = { 
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
-};
 
 typedef struct {
     struct ip 		ip;
@@ -150,8 +144,8 @@ bootp_transmit(int sockfd, char sendbuf[2048],
 		    payload = sendbuf + sizeof(*eh_p) + sizeof(*ip_udp);
 		    /* fill in the ethernet header */
 		    if (ntohl(dest_ip.s_addr) == INADDR_BROADCAST) {
-			bcopy(link_broadcast, eh_p->ether_dhost,
-			      sizeof(eh_p->ether_dhost));
+			memset(eh_p->ether_dhost, 0xff,
+			       sizeof(eh_p->ether_dhost));
 		    }
 		    else {
 			bcopy(hwaddr, eh_p->ether_dhost,
@@ -167,8 +161,9 @@ bootp_transmit(int sockfd, char sendbuf[2048],
 		    
 		    /* fill in the firewire header */
 		    fh_p = (struct firewire_header *)sendbuf;
-		    bcopy(link_broadcast, fh_p->firewire_dhost,
-			  sizeof(fh_p->firewire_dhost));
+		    memset(fh_p->firewire_dhost, 0xff,
+			   sizeof(fh_p->firewire_dhost));
+			   
 		    fh_p->firewire_type = htons(ETHERTYPE_IP);
 		    ip_udp = (ip_udp_header_t *)(sendbuf + sizeof(*fh_p));
 		    udp_pseudo = (udp_pseudo_hdr_t *)(((char *)&ip_udp->udp)

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2002 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -219,8 +217,8 @@ typedef void (*BSDPClientSelectCallBack)(BSDPClientRef client,
  * Function: BSDPClientCreate
  *
  * Purpose:
- *   Initialize a BSDPClientRef data structure so that it can be used
- *   with BSDPClientList() and BSDPClientSelect().
+ *   Allocate and initialize a BSDPClientRef for the default interface.
+ *   The BSDPClientRef is used with BSDPClientList() and BSDPClientSelect().
  *
  * Returns:
  *   A non-NULL BSDPClientRef if successful, NULL otherwise.
@@ -229,6 +227,20 @@ typedef void (*BSDPClientSelectCallBack)(BSDPClientRef client,
 BSDPClientRef
 BSDPClientCreate(BSDPClientStatus * status_p);
 
+/*
+ * Function: BSDPClientCreateWithInterface
+ *
+ * Purpose:
+ *   Allocate and initialize a BSDPClientRef for the specified interface.
+ *   The BSDPClientRef is used with BSDPClientList() and BSDPClientSelect().
+ *
+ * Returns:
+ *   A non-NULL BSDPClientRef if successful, NULL otherwise.
+ *   The status is returned in *status_p.
+ */
+BSDPClientRef
+BSDPClientCreateWithInterface(BSDPClientStatus * status_p,
+			      const char * ifname);
 /*
  * Function: BSDPClientFree
  * Purpose:

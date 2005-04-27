@@ -7,8 +7,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -47,7 +45,7 @@ int
 add_subnet_options(NIDomain_t * domain, u_char * hostname, 
 		   struct in_addr iaddr, 
 		   interface_t * intface, dhcpoa_t * options,
-		   u_char * tags, int n);
+		   const u_char * tags, int n);
 boolean_t
 bootp_add_bootfile(char * request_file, char * hostname, char * bootfile,
 		   char * reply_file);

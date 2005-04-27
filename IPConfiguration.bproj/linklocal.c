@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999-2001 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -107,7 +105,7 @@ in_addr_is_linklocal(struct in_addr iaddr)
     return (IN_LINKLOCAL(iptohl(iaddr)));
 }
 
-static __inline__ void
+static void
 linklocal_subnet_remove()
 {
     subnet_route_delete(G_ip_zeroes, hltoip(IN_LINKLOCALNETNUM),
@@ -115,7 +113,7 @@ linklocal_subnet_remove()
     return;
 }
 
-static __inline__ void
+static void
 linklocal_subnet_set(Service_t * service_p)
 {
     struct in_addr	iaddr = { 0 };
@@ -159,7 +157,7 @@ S_find_linklocal_address(interface_t * if_p)
     return (G_ip_zeroes);
 }
 
-void
+static void
 linklocal_cancel_pending_events(Service_t * service_p)
 {
     Service_linklocal_t * linklocal = (Service_linklocal_t *)service_p->private;
@@ -170,7 +168,7 @@ linklocal_cancel_pending_events(Service_t * service_p)
 	timer_cancel(linklocal->timer);
     }
     if (linklocal->arp) {
-	arp_cancel_probe(linklocal->arp);
+	arp_client_cancel_probe(linklocal->arp);
     }
     return;
 }
@@ -223,10 +221,10 @@ linklocal_init(Service_t * service_p, IFEventID_t event_id, void * event_data)
 	  }
 	  my_log(LOG_DEBUG, "LINKLOCAL %s: probing " IP_FORMAT, 
 		 if_name(if_p), IP_LIST(&linklocal->probe));
-	  arp_probe(linklocal->arp, 
-		    (arp_result_func_t *)linklocal_init, service_p,
-		    (void *)IFEventID_arp_e, G_ip_zeroes,
-		    linklocal->probe);
+	  arp_client_probe(linklocal->arp, 
+			   (arp_result_func_t *)linklocal_init, service_p,
+			   (void *)IFEventID_arp_e, G_ip_zeroes,
+			   linklocal->probe);
 	  /* wait for the results */
 	  return;
       }
@@ -290,10 +288,10 @@ linklocal_init(Service_t * service_p, IFEventID_t event_id, void * event_data)
 	  linklocal->probe.s_addr 
 	      = htonl(LINKLOCAL_FIRST_USEABLE 
 		      + random_range(0, LINKLOCAL_RANGE));
-	  arp_probe(linklocal->arp, 
-		    (arp_result_func_t *)linklocal_init, service_p,
-		    (void *)IFEventID_arp_e, G_ip_zeroes,
-		    linklocal->probe);
+	  arp_client_probe(linklocal->arp, 
+			   (arp_result_func_t *)linklocal_init, service_p,
+			   (void *)IFEventID_arp_e, G_ip_zeroes,
+			   linklocal->probe);
 	  my_log(LOG_DEBUG, "LINKLOCAL %s probing " IP_FORMAT, 
 		 if_name(if_p), IP_LIST(&linklocal->probe));
 	  /* wait for the results */
@@ -359,6 +357,8 @@ linklocal_thread(Service_t * service_p, IFEventID_t event_id, void * event_data)
 	      status = ipconfig_status_allocation_failed_e;
 	      goto stop;
 	  }
+	  /* ARP probes count as collisions for link-local address allocation */
+	  arp_client_set_probes_are_collisions(linklocal->arp, TRUE);
 	  linklocal->allocate = TRUE;
 	  if (ipcfg != NULL && ipcfg->reserved_0 == TRUE) {
 	      /* don't allocate an IP address, just set the subnet */

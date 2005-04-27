@@ -4,8 +4,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -34,12 +32,14 @@
 
 #include "nbsp.h"
 #include "bsdp.h"
+#include <sys/types.h>
 
 typedef enum {
     kNBImageTypeNone = 0,
     kNBImageTypeClassic,
     kNBImageTypeNFS,
     kNBImageTypeHTTP,
+    kNBImageTypeBootFileOnly,
 } NBImageType;
 
 typedef union {
@@ -70,6 +70,7 @@ typedef struct {
     NBImageTypeInfo	type_info;
     boolean_t		is_default;
     boolean_t		diskless;
+    boolean_t		filter_only;
     const char * *	sysids;
     int			sysids_count;
 } NBImageEntry, * NBImageEntryRef;
@@ -85,6 +86,10 @@ NBImageEntryRef NBImageList_elementWithID(NBImageListRef list, bsdp_image_id_t);
 NBImageListRef	NBImageList_init(NBSPListRef sharepoints);
 void		NBImageList_free(NBImageListRef * list);
 void		NBImageList_print(NBImageListRef images);
-NBImageEntryRef NBImageList_default(NBImageListRef images, const char * sysid);
+NBImageEntryRef NBImageList_default(NBImageListRef images, const char * sysid,
+				    const u_int16_t * attrs, int n_attrs);
+boolean_t	NBImageEntry_attributes_match(NBImageEntryRef entry,
+					      const u_int16_t * attrs,
+					      int n_attrs);
 
 #endif _S_NBIMAGES_H

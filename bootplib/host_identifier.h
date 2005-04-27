@@ -5,8 +5,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -46,9 +44,13 @@
  */
 
 u_char *
-identifierToString(u_char type, void * identifier, int len);
+identifierToString(const u_char type, const void * identifier, int len);
+
+u_char *
+identifierToStringWithBuffer(u_char type, const void * identifier, int len,
+			     u_char * buf, int buf_len);
 
 void *
-identifierFromString(u_char * str, u_char * type, int * len);
+identifierFromString(const u_char * str, u_char * type, int * len);
 
 #endif _S_HOST_IDENTIFIER_H

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2002 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -39,6 +37,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/errno.h>
 #include <sys/socket.h>
@@ -59,6 +58,9 @@
 #include <CoreFoundation/CFNumber.h>
 #include <CoreFoundation/CFRunLoop.h>
 #include <CoreFoundation/CFSocket.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+#include <SystemConfiguration/SCValidation.h>
+#include <SystemConfiguration/SCPrivate.h>
 
 #include "ioregpath.h"
 #include "BSDPClient.h"
@@ -72,19 +74,18 @@
 #include "interfaces.h"
 #include "bootp_transmit.h"
 
-#define BSDPCLIENT_LIST_MAX_TRIES		4
+#define BSDPCLIENT_MAX_WAIT_SECS		16
+#define BSDPCLIENT_LIST_MAX_TRIES		7
 #define BSDPCLIENT_SELECT_MAX_TRIES		2
-#define BSDPCLIENT_INITIAL_TIMEOUT_SECS		4
+#define BSDPCLIENT_INITIAL_TIMEOUT_SECS		2
 
 static const unsigned char	rfc_magic[4] = RFC_OPTIONS_MAGIC;
 
-extern struct ether_addr *ether_aton(char *);
-
-static u_char dhcp_params[] = {
+static const u_char dhcp_params[] = {
     dhcptag_vendor_class_identifier_e,
     dhcptag_vendor_specific_e,
 };
-static int	n_dhcp_params = sizeof(dhcp_params) / sizeof(dhcp_params[0]);
+#define N_DHCP_PARAMS	(sizeof(dhcp_params) / sizeof(dhcp_params[0]))
 
 #define NetBoot2InfoVersion	0x33000
 typedef enum {
@@ -106,6 +107,8 @@ typedef union {
     BSDPClientSelectCallBack	select;
 } BSDPClientCallBackUnion;
 
+#define MAX_ATTRS	10
+
 struct BSDPClient_s {
     char *				system_id;
     bsdp_version_t			client_version; /* network order */
@@ -122,6 +125,9 @@ struct BSDPClient_s {
     BSDPClientTimerCallBack		timer_callback;
     int					try;
     int					wait_secs;
+    u_int16_t				attrs[MAX_ATTRS];
+    int					n_attrs;
+    struct in_addr			our_ip;
 
     /* values provided by caller */
     struct {
@@ -132,6 +138,167 @@ struct BSDPClient_s {
     } callback;
 
 };
+
+static Boolean
+cfstring_to_ip(CFStringRef str, struct in_addr * ip_p)
+{
+    char        buf[32];
+
+    if (isA_CFString(str) == NULL) {
+	goto done;
+    }
+    (void)_SC_cfstring_to_cstring(str, buf, sizeof(buf), 
+				  kCFStringEncodingASCII);
+    if (inet_pton(AF_INET, buf, ip_p) == 1) {
+	return (TRUE);
+    }
+ done:
+    ip_p->s_addr = 0;
+    return (FALSE);
+}
+
+/* 
+ * Function: mySCNetworkServicePathCopyServiceID
+ * Purpose:
+ *    Take a path of the form:
+ *	"<domain>:/Network/Service/<serviceID>[/<entity>]";
+ *    and return the <serviceID> portion of the string.
+ */
+static CFStringRef
+mySCNetworkServicePathCopyServiceID(CFStringRef path)
+{
+    CFArrayRef		arr;
+    CFStringRef		serviceID = NULL;
+
+    arr = CFStringCreateArrayBySeparatingStrings(NULL, path, CFSTR("/"));
+    if (arr == NULL) {
+	goto done;
+    }
+    /* 
+     * arr = {"<domain:>","Network","Service","<serviceID>"[,"<entity>"]} 
+     * and we want the 4th component (arr[3]).
+     */
+    if (CFArrayGetCount(arr) < 4) {
+	goto done;
+    }
+    serviceID = CFRetain(CFArrayGetValueAtIndex(arr, 3));
+ done:
+    if (arr != NULL) {
+	CFRelease(arr);
+    }
+    return (serviceID);
+
+}
+
+static Boolean
+get_dhcp_address(const char * ifname, struct in_addr * ret_ip)
+{
+    CFStringRef		ifname_cf = NULL;
+    int			count;
+    CFDictionaryRef	info_dict = NULL;
+    int			i;
+    const void * *	keys = NULL;
+    CFStringRef		pattern;
+    CFMutableArrayRef	patterns;
+    Boolean		ret = FALSE;
+    SCDynamicStoreRef	store;
+    const void * *	values = NULL;
+
+    store = SCDynamicStoreCreate(NULL, CFSTR("get_dhcp_address"),
+				 NULL, NULL);
+    if (store == NULL) {
+	goto done;
+    }
+    ifname_cf = CFStringCreateWithCString(NULL, ifname, kCFStringEncodingASCII);
+
+    /* pattern State:/Network/Service/[^/]+/DHCP */
+    pattern 
+	= SCDynamicStoreKeyCreateNetworkServiceEntity(NULL,
+						      kSCDynamicStoreDomainState,
+						      kSCCompAnyRegex,
+						      kSCEntNetDHCP);
+    patterns = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+    CFArrayAppendValue(patterns, pattern);
+    CFRelease(pattern);
+    pattern 
+	= SCDynamicStoreKeyCreateNetworkServiceEntity(NULL,
+						      kSCDynamicStoreDomainState,
+						      kSCCompAnyRegex,
+						      kSCEntNetIPv4);
+    CFArrayAppendValue(patterns, pattern);
+    CFRelease(pattern);
+
+    info_dict = SCDynamicStoreCopyMultiple(store, NULL, patterns);
+    CFRelease(patterns);
+    if (isA_CFDictionary(info_dict) == NULL) {
+	goto done;
+    }
+    count = CFDictionaryGetCount(info_dict);
+    values = malloc(sizeof(void *) * count);
+    keys = malloc(sizeof(void *) * count);
+    CFDictionaryGetKeysAndValues(info_dict, keys, values);
+    for (i = 0; i < count; i++) {
+	CFArrayRef	addrs;
+	CFDictionaryRef	ipv4_dict;
+	Boolean		got_match;
+	CFStringRef	key;
+	CFStringRef	name;
+	CFStringRef	serviceID;
+
+	if (CFStringHasSuffix(keys[i], kSCEntNetIPv4) == FALSE) {
+	    continue;
+	}
+	ipv4_dict = isA_CFDictionary(values[i]);
+	if (ipv4_dict == NULL) {
+	    continue;
+	}
+	name = CFDictionaryGetValue(ipv4_dict, kSCPropInterfaceName);
+	if (name == NULL) {
+	    continue;
+	}
+	if (CFEqual(name, ifname_cf) == FALSE) {
+	    continue;
+	}
+	/* look for the DHCP entity for this service ID */
+	serviceID = mySCNetworkServicePathCopyServiceID(keys[i]);
+	if (serviceID == NULL) {
+	    continue;
+	}
+	key
+	    = SCDynamicStoreKeyCreateNetworkServiceEntity(NULL,
+							  kSCDynamicStoreDomainState,
+							  serviceID,
+							  kSCEntNetDHCP);
+	CFRelease(serviceID);
+	got_match = CFDictionaryContainsKey(info_dict, key);
+	CFRelease(key);
+	if (got_match == FALSE) {
+	    continue;
+	}
+	/* grab the IP address for this IPv4 dict */
+	addrs = CFDictionaryGetValue(ipv4_dict, kSCPropNetIPv4Addresses);
+	if (isA_CFArray(addrs) != NULL && CFArrayGetCount(addrs) > 0
+	    && cfstring_to_ip(CFArrayGetValueAtIndex(addrs, 0), ret_ip)) {
+	    ret = TRUE;
+	}
+	break;
+    }
+    
+ done:
+    if (values != NULL) {
+	free(values);
+    }
+    if (keys != NULL) {
+	free(keys);
+    }
+    if (info_dict != NULL) {
+	CFRelease(info_dict);
+    }
+    if (store != NULL) {
+	CFRelease(store);
+    }
+    return (ret);
+}
 
 static void
 BSDPClientProcessList(BSDPClientRef client, struct in_addr server_ip,
@@ -148,26 +315,6 @@ my_log(int priority, const char *message, ...)
     va_start(ap, message);
     vfprintf(stderr, message, ap);
     return;
-}
-
-static struct in_addr
-cfstring_to_ip(CFStringRef str)
-{
-    char		buf[32];
-    struct in_addr	ip = { 0 };
-    CFIndex		l;
-    int			n;
-    CFRange		range;
-
-    if (str == NULL)
-	return ip;
-
-    range = CFRangeMake(0, CFStringGetLength(str));
-    n = CFStringGetBytes(str, range, kCFStringEncodingMacRoman,
-			 0, FALSE, buf, sizeof(buf), &l);
-    buf[l] = '\0';	
-    inet_aton(buf, &ip);
-    return (ip);
 }
 
 static NetBootVersion
@@ -270,7 +417,7 @@ make_bsdp_request(char * system_id, struct dhcp * request, int pkt_size,
 
     /* add the list of required parameters */
     if (dhcpoa_add(options_p, dhcptag_parameter_request_list_e,
-		   n_dhcp_params, dhcp_params)
+		   N_DHCP_PARAMS, dhcp_params)
 	!= dhcpoa_success_e) {
 	fprintf(stderr, "make_bsdp_request: "
 	       "couldn't add parameter request list, %s",
@@ -506,7 +653,7 @@ BSDPClientProcess(CFSocketRef s, CFSocketCallBackType type,
 			  (u_char) if_link_arptype(client->if_p),
 			  if_link_address(client->if_p),
 			  if_link_length(client->if_p)) == FALSE
-	|| reply->dp_ciaddr.s_addr != if_inet_addr(client->if_p).s_addr) {
+	|| reply->dp_ciaddr.s_addr != client->our_ip.s_addr) {
 	/* wasn't us */
 	return;
     }
@@ -583,15 +730,17 @@ BSDPClientProcess(CFSocketRef s, CFSocketCallBackType type,
     return;
 }
 
+
 /*
- * Function: BSDPClientCreateWithInterface
+ * Function: BSDPClientCreateWithInterfaceAndAttributes
  * Purpose:
  *   Instantiate a BSDPClientRef, checking to ensure that the machine
  *   is NetBoot-compatible.
  */
 BSDPClientRef
-BSDPClientCreateWithInterface(BSDPClientStatus * status_p,
-			      const char * ifname)
+BSDPClientCreateWithInterfaceAndAttributes(BSDPClientStatus * status_p,
+					   const char * ifname, 
+					   const u_int16_t * attrs, int n_attrs)
 {
     BSDPClientRef	client = NULL;
     u_short		client_port;
@@ -635,6 +784,10 @@ BSDPClientCreateWithInterface(BSDPClientStatus * status_p,
 	status = kBSDPClientStatusNoSuchInterface;
 	goto cleanup;
     }
+    if (if_ift_type(if_p) != IFT_ETHER) {
+	status = kBSDPClientStatusInvalidArgument;
+	goto cleanup;
+    }
     /* make a persistent copy */
     if_p = if_dup(if_p);
     if (if_p == NULL) {
@@ -650,6 +803,21 @@ BSDPClientCreateWithInterface(BSDPClientStatus * status_p,
     }
     bzero(client, sizeof(*client));
 
+    /* use the DHCP-supplied address, if it is available */
+    if (get_dhcp_address(ifname, &client->our_ip) == FALSE) {
+	client->our_ip = if_inet_addr(if_p);
+    }
+    if (n_attrs > 0) {
+	int	i;
+
+	if (n_attrs > MAX_ATTRS) {
+	    n_attrs = MAX_ATTRS;
+	}
+	for (i = 0; i < n_attrs; i++) {
+	    client->attrs[i] = htons(attrs[i]);
+	}
+	client->n_attrs = n_attrs;
+    }
     fd = S_open_socket(&client_port);
     if (fd < 0) {
 	if (errno == EPERM || errno == EACCES) {
@@ -719,6 +887,19 @@ BSDPClientCreateWithInterface(BSDPClientStatus * status_p,
 }
 
 /*
+ * Function: BSDPClientCreateWithInterface
+ * Purpose:
+ *   Allocate a new session.
+ */
+BSDPClientRef
+BSDPClientCreateWithInterface(BSDPClientStatus * status_p,
+			      const char * ifname)
+{
+    return (BSDPClientCreateWithInterfaceAndAttributes(status_p, ifname, 
+						       NULL, 0));
+}
+
+/*
  * Function: BSDPClientCreate
  * Purpose:
  *   Published entry point to instantiate a BSDPClientRef over "en0".
@@ -770,6 +951,22 @@ BSDPClientFree(BSDPClientRef * client_p)
 /**
  ** BSDP List Routines
  **/
+static boolean_t
+attributes_match(u_int16_t attrs,
+		 const u_int16_t * attrs_list, int n_attrs_list)
+{
+    int		i;
+
+    if (attrs_list == NULL || n_attrs_list == 0) {
+	return (TRUE);
+    }
+    for (i = 0; i < n_attrs_list; i++) {
+	if (attrs_list[i] == attrs) {
+	    return (TRUE);
+	}
+    }
+    return (FALSE);
+}
 
 static CFArrayRef
 BSDPClientCreateImageList(BSDPClientRef client,
@@ -784,6 +981,7 @@ BSDPClientCreateImageList(BSDPClientRef client,
     images = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
     descr = image_list;
     for (length = image_list_len; length > sizeof(*descr); ) {
+	u_int16_t		attributes;
 	bsdp_image_id_t		boot_image_id;
 	CFMutableDictionaryRef	this_dict = NULL;
 	int			this_len;
@@ -798,8 +996,10 @@ BSDPClientCreateImageList(BSDPClientRef client,
 	    goto failed;
 	}
 	boot_image_id = ntohl(*((bsdp_image_id_t *)descr->boot_image_id));
-	if (boot_image_id != BOOT_IMAGE_ID_NULL) {
-	    u_int16_t	attributes;
+	attributes = bsdp_image_attributes(boot_image_id);
+	if (boot_image_id != BOOT_IMAGE_ID_NULL
+	    && attributes_match(htons(attributes), 
+				client->attrs, client->n_attrs)) {
 	    u_int16_t	index;
 
 	    this_dict
@@ -809,7 +1009,6 @@ BSDPClientCreateImageList(BSDPClientRef client,
 	    cf_image_id = CFNumberCreate(NULL, kCFNumberSInt32Type, 
 					 &boot_image_id);
 	    index = bsdp_image_index(boot_image_id);
-	    attributes = bsdp_image_attributes(boot_image_id);
 	    cf_image_index = CFNumberCreate(NULL, kCFNumberShortType, 
 					    &index);
 	    cf_image_name = CFStringCreateWithBytes(NULL, 
@@ -943,7 +1142,6 @@ BSDPClientSendListRequest(BSDPClientRef client)
     BSDPClientStatus	status = kBSDPClientStatusAllocationError;
 
     ip_broadcast.s_addr = htonl(INADDR_BROADCAST);
-    client->xid++;
     request = make_bsdp_request(client->system_id,
 				(struct dhcp *)buf, sizeof(buf),
 				dhcp_msgtype_inform_e, 
@@ -955,7 +1153,7 @@ BSDPClientSendListRequest(BSDPClientRef client)
 	goto failed;
     }
     request->dp_xid = htonl(client->xid);
-    request->dp_ciaddr = if_inet_addr(client->if_p);
+    request->dp_ciaddr = client->our_ip;
     dhcpoa_init_no_end(&bsdp_options, bsdp_buf, sizeof(bsdp_buf));
     msgtype = bsdp_msgtype_list_e;
     if (dhcpoa_add(&bsdp_options, bsdptag_message_type_e,
@@ -986,6 +1184,16 @@ BSDPClientSendListRequest(BSDPClientRef client)
 		dhcpoa_err(&bsdp_options));
 	goto failed;
     }
+    if (client->n_attrs > 0) {
+	if (dhcpoa_add(&bsdp_options,bsdptag_image_attributes_filter_list_e,
+		       client->n_attrs * sizeof(client->attrs[0]),
+		       client->attrs) != dhcpoa_success_e) {
+	    fprintf(stderr, 
+		    "BSDPClientSendListRequest add image attributes failed, %s",
+		    dhcpoa_err(&bsdp_options));
+	    goto failed;
+	}
+    }
     if (dhcpoa_add(&options, dhcptag_vendor_specific_e,
 		   dhcpoa_used(&bsdp_options), &bsdp_buf)
 	!= dhcpoa_success_e) {
@@ -1009,7 +1217,7 @@ BSDPClientSendListRequest(BSDPClientRef client)
     }
     if (bootp_transmit(client->fd, client->send_buf,
 		       if_name(client->if_p), ARPHRD_ETHER, NULL, 0,
-		       ip_broadcast, if_inet_addr(client->if_p),
+		       ip_broadcast, client->our_ip,
 		       IPPORT_BOOTPS, client->client_port,
 		       request, request_size) < 0) {
 	fprintf(stderr,
@@ -1035,14 +1243,16 @@ BSDPClientListTimeout(BSDPClientRef client)
 	goto report_error;
     }
     client->try++;
-    client->xid++;
     client->wait_secs *= 2;
+    if (client->wait_secs > BSDPCLIENT_MAX_WAIT_SECS) {
+	client->wait_secs = BSDPCLIENT_MAX_WAIT_SECS;
+    }
     status = BSDPClientSendListRequest(client);
     if (status != kBSDPClientStatusOK) {
 	goto report_error;
     }
     t.tv_sec = client->wait_secs;
-    t.tv_usec = 0;
+    t.tv_usec = random_range(0, USECS_PER_SEC - 1);
     BSDPClientSetTimer(client, t, BSDPClientListTimeout);
     return;
 
@@ -1076,7 +1286,7 @@ BSDPClientList(BSDPClientRef client, BSDPClientListCallBack callback,
     client->callback.arg = info;
     client->wait_secs = BSDPCLIENT_INITIAL_TIMEOUT_SECS;
     t.tv_sec = client->wait_secs;
-    t.tv_usec = 0;
+    t.tv_usec = random_range(0, USECS_PER_SEC - 1);
     BSDPClientSetTimer(client, t, BSDPClientListTimeout);
 
  failed:
@@ -1130,7 +1340,7 @@ BSDPClientSendSelectRequest(BSDPClientRef client)
 	goto failed;
     }
     request->dp_xid = htonl(client->xid);
-    request->dp_ciaddr = if_inet_addr(client->if_p);
+    request->dp_ciaddr = client->our_ip;
     dhcpoa_init_no_end(&bsdp_options, bsdp_buf, sizeof(bsdp_buf));
     msgtype = bsdp_msgtype_select_e;
     if (dhcpoa_add(&bsdp_options, bsdptag_message_type_e,
@@ -1201,7 +1411,7 @@ BSDPClientSendSelectRequest(BSDPClientRef client)
     /* send the packet */
     if (bootp_transmit(client->fd, client->send_buf,
 		       if_name(client->if_p), ARPHRD_ETHER, NULL, 0,
-		       ip_broadcast, if_inet_addr(client->if_p),
+		       ip_broadcast, client->our_ip,
 		       IPPORT_BOOTPS, client->client_port,
 		       request, request_size) < 0) {
 	fprintf(stderr,
@@ -1227,7 +1437,6 @@ BSDPClientSelectTimeout(BSDPClientRef client)
 	goto report_error;
     }
     client->try++;
-    client->xid++;
     client->wait_secs *= 2;
     status = BSDPClientSendSelectRequest(client);
     if (status != kBSDPClientStatusOK) {
@@ -1252,7 +1461,7 @@ BSPPClientSelect(BSDPClientRef client,
     struct timeval	t;
     BSDPClientStatus	status = kBSDPClientStatusAllocationError;
 
-    client->callback.server_ip = cfstring_to_ip(ServerAddress);
+    (void)cfstring_to_ip(ServerAddress, &client->callback.server_ip);
     client->state = kBSDPClientStateInit;
     BSDPClientCancelTimer(client);
     if (callback == NULL

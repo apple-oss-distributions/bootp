@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999, 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -90,16 +88,15 @@ typedef struct {
 } Service_bootp_t;
 
 /* tags_search: these are the tags we look for using BOOTP */
-static u_char       	bootp_params[] = { 
+static const u_char       	bootp_params[] = { 
     dhcptag_host_name_e,
     dhcptag_subnet_mask_e, 
     dhcptag_router_e,
     dhcptag_domain_name_server_e,
     dhcptag_domain_name_e,
 };
-int			n_bootp_params = sizeof(bootp_params) 
-				        / sizeof(bootp_params[0]);
-#define IDEAL_RATING	n_bootp_params
+#define N_BOOTP_PARAMS	(sizeof(bootp_params) / sizeof(bootp_params[0]))
+#define IDEAL_RATING	N_BOOTP_PARAMS
 
 static void 
 bootp_request(Service_t * service_p, IFEventID_t evid, void * event_data);
@@ -139,7 +136,7 @@ S_cancel_pending_events(Service_t * service_p)
 	bootp_client_disable_receive(bootp->client);
     }
     if (bootp->arp) {
-	arp_cancel_probe(bootp->arp);
+	arp_client_cancel_probe(bootp->arp);
     }
     return;
 }
@@ -215,11 +212,11 @@ bootp_arp_probe(Service_t * service_p,  IFEventID_t evid, void * event_data)
 	  (void)service_disable_autoaddr(service_p);
 	  bootp_client_disable_receive(bootp->client);
 	  timer_cancel(bootp->timer);
-	  arp_cancel_probe(bootp->arp);
-	  arp_probe(bootp->arp, 
-		    (arp_result_func_t *)bootp_arp_probe, service_p,
-		    (void *)IFEventID_arp_e, G_ip_zeroes,
-		    reply->bp_yiaddr);
+	  arp_client_cancel_probe(bootp->arp);
+	  arp_client_probe(bootp->arp, 
+			   (arp_result_func_t *)bootp_arp_probe, service_p,
+			   (void *)IFEventID_arp_e, G_ip_zeroes,
+			   reply->bp_yiaddr);
 	  return;
 	  break;
       }
@@ -316,8 +313,7 @@ bootp_request(Service_t * service_p, IFEventID_t evid, void * event_data)
 	    = htons((u_short)(timer_current_secs() - bootp->start_secs));
 	  bootp->request.bp_xid = htonl(bootp->xid);
 	  /* send the packet */
-	  if (bootp_client_transmit(bootp->client, if_name(if_p),
-				    bootp->request.bp_htype, NULL, 0,
+	  if (bootp_client_transmit(bootp->client,
 				    G_ip_broadcast, G_ip_zeroes,
 				    G_server_port, G_client_port,
 				    &bootp->request, 
@@ -356,7 +352,7 @@ bootp_request(Service_t * service_p, IFEventID_t evid, void * event_data)
 	      /* not an interesting packet, drop the packet */
 	      break; /* out of case */
 	  }
-	  rating = count_params(&pkt->options, bootp_params, n_bootp_params);
+	  rating = count_params(&pkt->options, bootp_params, N_BOOTP_PARAMS);
 	  if (bootp->saved.pkt_size == 0
 	      || rating > bootp->saved.rating) {
 	      dhcpol_free(&bootp->saved.options);
@@ -439,7 +435,7 @@ bootp_thread(Service_t * service_p, IFEventID_t evid, void * event_data)
 	      goto stop;
 	  }
 	  (void)service_enable_autoaddr(service_p);
-	  bootp->client = bootp_client_init(G_bootp_session);
+	  bootp->client = bootp_client_init(G_bootp_session, if_p);
 	  if (bootp->client == NULL) {
 	      my_log(LOG_ERR, "BOOTP %s: bootp_client_init failed",
 		     if_name(if_p));
@@ -554,6 +550,11 @@ bootp_thread(Service_t * service_p, IFEventID_t evid, void * event_data)
 				     service_p, NULL, NULL);
 	      }
 	  }
+	  break;
+      }
+      case IFEventID_network_changed_e: {
+	  /* switched networks, remove the IP address to avoid IP collisions */
+	  (void)service_remove_address(service_p);
 	  break;
       }
       default:

@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -87,6 +85,7 @@
 #include <mach/boolean.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>
@@ -121,9 +120,6 @@
 #define CFGPROP_ALLOW			"allow"
 #define CFGPROP_DENY			"deny"
 #define CFGPROP_REPLY_THRESHOLD_SECONDS	"reply_threshold_seconds"
-
-/* external functions */
-extern struct ether_addr *	ether_aton(char *);
 
 /* local defines */
 #define	MAXIDLE			(5*60)	/* we hang around for five minutes */
@@ -174,13 +170,13 @@ static u_short			S_ipport_client = IPPORT_BOOTPC;
 static u_short			S_ipport_server = IPPORT_BOOTPS;
 static struct timeval		S_lastmsgtime;
 static u_char 			S_rxpkt[2048];/* receive packet buffer */
-static int			S_rtsockfd = -1;
 static boolean_t		S_sighup = TRUE; /* fake the 1st sighup */
 static u_int32_t		S_which_services = 0;
 static struct ether_addr *	S_allow = NULL;
 static int			S_allow_count = 0;
 static struct ether_addr *	S_deny = NULL;
 static int			S_deny_count = 0;
+static int			S_persist = 0;
 
 void
 my_log(int priority, const char *message, ...)
@@ -190,7 +186,10 @@ my_log(int priority, const char *message, ...)
     if (priority == LOG_DEBUG) {
 	if (verbose == FALSE)
 	    return;
-	priority = LOG_INFO;
+	priority = LOG_NOTICE;
+    }
+    else if (priority == LOG_INFO) {
+	priority = LOG_NOTICE;
     }
     if (quiet && (priority > LOG_ERR)) { 
 	return;
@@ -509,6 +508,7 @@ S_get_dns()
 
     res_init(); /* figure out the default dns servers */
 
+    S_domain_name = NULL;
     if (S_dns_servers) {
 	free(S_dns_servers);
 	S_dns_servers = NULL;
@@ -521,7 +521,7 @@ S_get_dns()
     if (S_dns_servers_count) {
 	S_dns_servers = (struct in_addr *)malloc(sizeof(*S_dns_servers) 
 						 * S_dns_servers_count);
-	if (_res.defdname[0]) {
+	if (_res.defdname[0] && strcmp(_res.defdname, "local") != 0) {
 	    S_domain_name = _res.defdname;
 	    if (debug)
 		printf("%s\n", S_domain_name);
@@ -588,7 +588,9 @@ S_log_interfaces()
     }
     if (count == 0) {
 	my_log(LOG_INFO, "no available interfaces");
-	exit(2);
+	if (S_persist == 0) {
+	    exit(2);
+	}
     }
     return;
 }
@@ -844,14 +846,14 @@ S_update_services()
     reply_threshold_seconds = 0;
     nl_p = PropList_lookup(&S_config_dhcp, CFGPROP_REPLY_THRESHOLD_SECONDS);
     if (nl_p != NULL && nl_p->ninl_len != 0) {
-	reply_threshold_seconds = strtoul(nl_p->ninl_val[0], NULL, NULL);
+	reply_threshold_seconds = strtoul(nl_p->ninl_val[0], NULL, 0);
     }
 
     /* detect other DHCP server */
     detect_other_dhcp_server = 0;
     nl_p = PropList_lookup(&S_config_dhcp, CFGPROP_DETECT_OTHER_DHCP_SERVER);
     if (nl_p != NULL && nl_p->ninl_len != 0) {
-	if (strtol(nl_p->ninl_val[0], NULL, NULL) != 0) {
+	if (strtol(nl_p->ninl_val[0], NULL, 0) != 0) {
 	    detect_other_dhcp_server = 1;
 	}
     }
@@ -893,7 +895,7 @@ old_netboot_enabled(interface_t * if_p)
 void
 usage()
 {
-    fprintf(stderr, "useage: bootpd <options>\n"
+    fprintf(stderr, "usage: bootpd <options>\n"
 	    "<options> are:\n"
 	    "[ -a ] 	support anonymous binding for BOOTP clients\n"
 	    "[ -D ]	be a DHCP server\n"
@@ -925,7 +927,6 @@ main(int argc, char * argv[])
     int			logopt = LOG_CONS;
     int			max_hops = 4;
     boolean_t		netinfo_lookups = TRUE;
-    boolean_t		persist = 0;
     boolean_t		relay = FALSE;
     struct in_addr	relay_server = { 0 };
 
@@ -948,7 +949,7 @@ main(int argc, char * argv[])
 	    /* reply only if bootfile exists */
 	    break;
 	case 'c':		    /* cache check interval - seconds */
-	    S_cache_check_interval = strtoul(optarg, NULL, NULL);
+	    S_cache_check_interval = strtoul(optarg, NULL, 0);
 	    printf("Using cache check interval %ld seconds\n",
 		   S_cache_check_interval);
 	    break;
@@ -1004,11 +1005,11 @@ main(int argc, char * argv[])
 	    break;
 	}
 	case 'P': {
-	    persist = 1;
+	    S_persist = 1;
 	    break;
 	}
 	case 'p': {
-	    server_priority = strtoul(optarg, NULL, NULL);
+	    server_priority = strtoul(optarg, NULL, 0);
 	    printf("Priority set to %d\n", server_priority);
 	    break;
 	}
@@ -1064,7 +1065,7 @@ main(int argc, char * argv[])
     else { /* started by inetd */
 	bootp_socket = 0;
 	gettimeofday(&S_lastmsgtime, 0);
-	if (persist == 0) {
+	if (S_persist == 0) {
 	    signal(SIGALRM, on_alarm);
 	    alarm(15);
 	}
@@ -1135,13 +1136,6 @@ main(int argc, char * argv[])
 	S_update_services();
     }
 
-    S_rtsockfd = arp_get_routing_socket();
-    if (S_rtsockfd < 0) {
-	my_log(LOG_INFO, "couldn't get routing socket: %s",
-	       strerror(errno));
-	exit(1);
-    }
-	
     if (relay) {
 	S_relay_loop(&relay_server, max_hops);
     }
@@ -1415,7 +1409,7 @@ bootp_request(request_t * request)
     u_char *		hostname = NULL;
     struct in_addr	iaddr;
     boolean_t		netinfo_host = FALSE;
-    static u_char	netinfo_options[] = {
+    static const u_char	netinfo_options[] = {
 	dhcptag_subnet_mask_e, 
 	dhcptag_router_e, 
 	dhcptag_netinfo_server_address_e,
@@ -1424,8 +1418,7 @@ bootp_request(request_t * request)
 	dhcptag_domain_name_e,
 	dhcptag_host_name_e,
     };
-    static int		n_netinfo_options 
-	= sizeof(netinfo_options) / sizeof(netinfo_options[0]);
+#define N_NETINFO_OPTIONS (sizeof(netinfo_options) / sizeof(netinfo_options[0]))
     struct bootp 	rp;
     struct bootp *	rq = (struct bootp *)request->pkt;
     u_int16_t		secs;
@@ -1496,7 +1489,7 @@ bootp_request(request_t * request)
 	    my_log(LOG_DEBUG, "netinfo client");
 	    add_subnet_options(domain, hostname, iaddr, 
 			       request->if_p, &options, 
-			       netinfo_options, n_netinfo_options);
+			       netinfo_options, N_NETINFO_OPTIONS);
 	}
 	else {
 	    add_subnet_options(domain, hostname, iaddr, 
@@ -1604,7 +1597,7 @@ get_dhcp_option(id subnet, int tag, void * buf, int * len_p)
     unsigned char	err[256];
     unsigned char	propname[128];
     ni_namelist	*	nl_p;
-    unsigned char *	tag_name;
+    const char *	tag_name;
 
     tag_name = dhcptag_name(tag);
     if (tag_name == NULL)
@@ -1641,28 +1634,27 @@ get_dhcp_option(id subnet, int tag, void * buf, int * len_p)
 int
 add_subnet_options(NIDomain_t * domain, u_char * hostname, 
 		   struct in_addr iaddr, interface_t * if_p,
-		   dhcpoa_t * options, u_char * tags, int n)
+		   dhcpoa_t * options, const u_char * tags, int n)
 {
     inet_addrinfo_t *	info = if_inet_addr_at(if_p, 0);
     char		buf[DHCP_OPTION_SIZE_MAX];
     int			len;
-    static u_char 	default_tags[] = { 
+    static const u_char 	default_tags[] = { 
 	dhcptag_subnet_mask_e, 
 	dhcptag_router_e, 
 	dhcptag_domain_name_server_e,
 	dhcptag_domain_name_e,
 	dhcptag_host_name_e,
     };
+#define N_DEFAULT_TAGS	(sizeof(default_tags) / sizeof(default_tags[0]))
     boolean_t		netinfo_done = FALSE;
-    static int		n_default_tags 
-	= sizeof(default_tags) / sizeof(default_tags[0]);
     int			number_before = dhcpoa_count(options);
     int			i;
     id			subnet = [subnets entry:iaddr];
 
     if (tags == NULL) {
-	tags = default_tags;
-	n = n_default_tags;
+	tags = (u_char *)default_tags;
+	n = N_DEFAULT_TAGS;
     }
 			
     for (i = 0; i < n; i++ ) {
@@ -1816,7 +1808,7 @@ add_subnet_options(NIDomain_t * domain, u_char * hostname,
 /**
  ** Server Main Loop
  **/
-static char 		control[1024];
+static char 		control[512];
 static struct iovec  	iov;
 static struct msghdr 	msg;
 
@@ -1981,6 +1973,9 @@ S_dispatch_packet(struct bootp * bp, int n, interface_t * if_p,
 				     arch, sysid, &rq_vsopt, client_version,
 				     is_old_netboot);
 		    }
+		}
+		else {
+		    bsdp_dhcp_request(&request, dhcp_msgtype);
 		}
 		dhcpol_free(&rq_vsopt);
 	    }
@@ -2184,6 +2179,9 @@ S_server_loop()
 	if (n < sizeof(struct dhcp)) {
 	    continue;
 	}
+	if (request->dp_hlen > sizeof(request->dp_chaddr)) {
+	    continue;
+	}
 	if (S_ok_to_respond(request->dp_htype, request->dp_chaddr, 
 			    request->dp_hlen) == FALSE) {
 	    continue;
@@ -2265,13 +2263,12 @@ S_relay_loop(struct in_addr * relay, int max_hops)
 
 #include <SystemConfiguration/SystemConfiguration.h>
 #include <SystemConfiguration/SCDynamicStorePrivate.h>
-
+static SCDynamicStoreRef	store;
 static void
 S_add_ip_change_notifications()
 {
     CFStringRef			key;
     CFMutableArrayRef		patterns;
-    SCDynamicStoreRef		store;
 
     store = SCDynamicStoreCreate(NULL,
 				 CFSTR("com.apple.network.bootpd"),

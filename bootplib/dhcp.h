@@ -7,8 +7,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -110,7 +108,8 @@ dhcp_msgtype_names(dhcp_msgtype_t type)
 #define DHCP_OVERLOAD_BOTH	3
 
 typedef int32_t			dhcp_time_secs_t; /* absolute time */
-typedef int32_t			dhcp_lease_t;     /* relative time */
+typedef dhcp_time_secs_t	dhcp_interval_secs_t; /* relative interval */
+typedef dhcp_interval_secs_t	dhcp_lease_t;
 #define dhcp_time_hton		htonl
 #define dhcp_time_ntoh		ntohl
 #define dhcp_lease_hton		htonl

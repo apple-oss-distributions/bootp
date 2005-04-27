@@ -6,8 +6,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -33,6 +31,7 @@
 #include "gen_dhcp_tags.h"
 
 void	dhcp_print_packet(struct dhcp *dp, int pkt_len);
+void	dhcp_fprint_packet(FILE * f, struct dhcp *dp, int pkt_len);
 
 static __inline__ struct timeval
 timeval_from_secs(dhcp_time_secs_t secs)

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -40,41 +38,24 @@
 #include <sys/time.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include "netinfo.h"
+#include "bsdp.h"
+#include "DHCPServer.h"
 
-CFStringRef	kDHCPSPropName;
-CFStringRef	kDHCPSPropIdentifier;
+const CFStringRef	kDHCPSPropName = CFSTR(NIPROP_NAME);
+const CFStringRef	kDHCPSPropIdentifier = CFSTR(NIPROP_IDENTIFIER);
 
-CFStringRef	kDHCPSPropDHCPHWAddress;
-CFStringRef	kDHCPSPropDHCPIPAddress;
-CFStringRef	kDHCPSPropDHCPLease;
+const CFStringRef	kDHCPSPropDHCPHWAddress = CFSTR(NIPROP_HWADDR);
+const CFStringRef	kDHCPSPropDHCPIPAddress = CFSTR(NIPROP_IPADDR);
+const CFStringRef	kDHCPSPropDHCPLease = CFSTR(NIPROP_DHCP_LEASE);
 
-CFStringRef	kDHCPSPropNetBootArch;
-CFStringRef	kDHCPSPropNetBootSysid;
-CFStringRef	kDHCPSPropNetBootImageID;
-CFStringRef	kDHCPSPropNetBootLastBootTime;
-
-static void
-init_vars()
-{
-    static boolean_t	initialized = FALSE;
-
-    if (initialized) {
-	return;
-    }
-    initialized = TRUE;
-    kDHCPSPropName = CFSTR(NIPROP_NAME);
-    kDHCPSPropIdentifier = CFSTR(NIPROP_IDENTIFIER);
-
-    kDHCPSPropDHCPIPAddress = CFSTR(NIPROP_IPADDR);
-    kDHCPSPropDHCPHWAddress = CFSTR(NIPROP_HWADDR);
-    kDHCPSPropDHCPLease = CFSTR(NIPROP_DHCP_LEASE);
-
-    kDHCPSPropNetBootArch = CFSTR(NIPROP_NETBOOT_ARCH);
-    kDHCPSPropNetBootSysid = CFSTR(NIPROP_NETBOOT_SYSID);
-    kDHCPSPropNetBootImageID = CFSTR(NIPROP_NETBOOT_IMAGE_ID);
-    kDHCPSPropNetBootLastBootTime = CFSTR(NIPROP_NETBOOT_LAST_BOOT_TIME);
-    return;
-}
+const CFStringRef	kDHCPSPropNetBootArch = CFSTR(NIPROP_NETBOOT_ARCH);
+const CFStringRef	kDHCPSPropNetBootSysid = CFSTR(NIPROP_NETBOOT_SYSID);
+const CFStringRef	kDHCPSPropNetBootLastBootTime = CFSTR(NIPROP_NETBOOT_LAST_BOOT_TIME);
+const CFStringRef	kDHCPSPropNetBootIPAddress = CFSTR(NIPROP_IPADDR);
+const CFStringRef	kDHCPSPropNetBootImageID = CFSTR(NIPROP_NETBOOT_IMAGE_ID);
+const CFStringRef	kDHCPSPropNetBootImageIndex = CFSTR(NIPROP_NETBOOT_IMAGE_INDEX);
+const CFStringRef	kDHCPSPropNetBootImageKind = CFSTR(NIPROP_NETBOOT_IMAGE_KIND);
+const CFStringRef	kDHCPSPropNetBootImageIsInstall = CFSTR(NIPROP_NETBOOT_IMAGE_IS_INSTALL);
 
 static CFMutableArrayRef
 read_host_list(u_char * filename)
@@ -286,18 +267,19 @@ cook_for_netboot(CFArrayRef arr)
     
     count = CFArrayGetCount(arr);
     for (i = 0; i < count; i++) {
-	char			buf[128];
 	CFAbsoluteTime		abs_exp;
+	CFMutableDictionaryRef 	dict;
+	char			buf[128];
+	CFStringRef		image_id_str;
+	uint32_t		image_id;
 	CFDateRef		last_boot_time;
 	long			last_boot_val = 0;
 	long			last_boot_delta = 0;
 	CFStringRef		last_boot_time_str;
-	CFMutableDictionaryRef 	dict;
 
 	dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(arr, i);
 	last_boot_time_str 
-	    = CFDictionaryGetValue(dict, 
-				   kDHCPSPropNetBootLastBootTime);
+	    = CFDictionaryGetValue(dict, kDHCPSPropNetBootLastBootTime);
 	if (last_boot_time_str) {
 	    cfstring_to_cstring(last_boot_time_str, buf, sizeof(buf));
 	    last_boot_val = strtol(buf, 0, 0);
@@ -311,6 +293,39 @@ cook_for_netboot(CFArrayRef arr)
 				 last_boot_time);
 	    CFRelease(last_boot_time);
 	}
+	image_id_str = CFDictionaryGetValue(dict, kDHCPSPropNetBootImageID);
+	if (image_id_str != NULL) {
+	    CFNumberRef		num;
+	    uint32_t		image_attrs;
+	    uint32_t		image_index;
+	    uint32_t		image_kind;
+
+	    cfstring_to_cstring(image_id_str, buf, sizeof(buf));
+	    image_id = strtoul(buf, NULL, 0);
+	    image_attrs = bsdp_image_attributes(image_id);
+	    image_index = bsdp_image_index(image_id);
+	    image_kind = bsdp_image_kind_from_attributes(image_attrs);
+
+	    /* set the Index */
+	    num = CFNumberCreate(NULL, kCFNumberSInt32Type, &image_index);
+	    CFDictionarySetValue(dict, kDHCPSPropNetBootImageIndex, num);
+	    CFRelease(num);
+
+	    /* set the Kind */
+	    num = CFNumberCreate(NULL, kCFNumberSInt32Type, &image_kind);
+	    CFDictionarySetValue(dict, kDHCPSPropNetBootImageKind, num);
+	    CFRelease(num);
+	    
+	    /* set IsInstall */
+	    if (bsdp_image_identifier_is_install(image_id)) {
+		CFDictionarySetValue(dict, kDHCPSPropNetBootImageIsInstall,
+				     kCFBooleanTrue);
+	    }
+	    else {
+		CFDictionarySetValue(dict, kDHCPSPropNetBootImageIsInstall,
+				     kCFBooleanFalse);
+	    }
+	}
     }
     return (arr);
 }
@@ -319,8 +334,6 @@ CFArrayRef
 DHCPSDHCPLeaseListCreate()
 {
     CFArrayRef arr;
-
-    init_vars();
 
     arr = read_host_list("/var/db/dhcpd_leases");
     if (arr == NULL) {
@@ -338,8 +351,6 @@ CFArrayRef
 DHCPSNetBootClientListCreate()
 {
     CFArrayRef arr;
-
-    init_vars();
 
     arr = read_host_list("/var/db/bsdpd_clients");
     if (arr == NULL) {

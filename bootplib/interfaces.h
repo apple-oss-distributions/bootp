@@ -5,8 +5,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -77,8 +75,9 @@ typedef struct {
 typedef struct {
     char 		name[IFNAMSIZ + 1]; /* eg. en0 */
     short		flags;
+    u_char		type;	/* e.g. IFT_ETHER */
     dynarray_t		inet;
-    link_addr_t		link;
+    link_addr_t		link_address;
     u_int32_t		user_defined;
 } interface_t;
 
@@ -114,7 +113,7 @@ int			ifl_index(interface_list_t * list_p,
  * Purpose:
  *   Interface-specific routines.
  */
-interface_t *		if_dup(interface_t * intface); /* dup an entry */
+interface_t *		if_dup(interface_t * if_p); /* dup an entry */
 void			if_free(interface_t * * if_p_p); /* free dup'd entry */
 char *			if_name(interface_t * if_p);
 short			if_flags(interface_t * if_p);
@@ -134,11 +133,16 @@ struct in_addr		if_inet_broadcast(interface_t * if_p);
 boolean_t		if_inet_valid(interface_t * if_p);
 inet_addrinfo_t *	if_inet_addr_at(interface_t * if_p, int i);
 
+int			if_ift_type(interface_t * if_p);
+
 int			if_link_type(interface_t * if_p);
 int			if_link_dhcptype(interface_t * if_p);
 int			if_link_arptype(interface_t * if_p);
 void *			if_link_address(interface_t * if_p);
 int			if_link_length(interface_t * if_p);
+void			if_link_update(interface_t * if_p);
+void			if_link_copy(interface_t * dest, 
+				     const interface_t * source);
 
 static __inline__ int
 dl_to_arp_hwtype(int dltype)

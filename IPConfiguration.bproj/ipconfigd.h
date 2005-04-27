@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -36,6 +34,4 @@ extern ipconfig_status_t set_if(char * name, ipconfig_method_t method,
 				void * method_data, 
 				unsigned int method_data_len,
 				void * serviceID);
-
-
-
+extern ipconfig_status_t set_verbose(int verbose);

@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -44,26 +42,24 @@ char copyright_string[] =
 "/*\n"
 " * Copyright (c) 1999-2003 Apple Computer, Inc. All rights reserved.\n"
 " *\n"
-" * @APPLE_LICENSE_HEADER_START@
-" * 
-" * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
-" * 
-" * This file contains Original Code and/or Modifications of Original Code
-" * as defined in and that are subject to the Apple Public Source License
-" * Version 2.0 (the 'License'). You may not use this file except in
-" * compliance with the License. Please obtain a copy of the License at
-" * http://www.opensource.apple.com/apsl/ and read it before using this
-" * file.
-" * 
-" * The Original Code and all software distributed under the License are
-" * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-" * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
-" * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
-" * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
-" * Please see the License for the specific language governing rights and
-" * limitations under the License.
-" * 
-" * @APPLE_LICENSE_HEADER_END@
+" * @APPLE_LICENSE_HEADER_START@\n"
+" * \n"
+" * This file contains Original Code and/or Modifications of Original Code\n"
+" * as defined in and that are subject to the Apple Public Source License\n"
+" * Version 2.0 (the 'License'). You may not use this file except in\n"
+" * compliance with the License. Please obtain a copy of the License at\n"
+" * http://www.opensource.apple.com/apsl/ and read it before using this\n"
+" * file.\n"
+" * \n"
+" * The Original Code and all software distributed under the License are\n"
+" * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER\n"
+" * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,\n"
+" * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,\n"
+" * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.\n"
+" * Please see the License for the specific language governing rights and\n"
+" * limitations under the License.\n"
+" * \n"
+" * @APPLE_LICENSE_HEADER_END@\n"
 " */\n";
 
 
@@ -192,6 +188,8 @@ struct {
     { 113, 	"string",	"netinfo_server_tag" },
     { COMMENT, "/* ad-hoc network disable option */", 0 },
     { 116,	"uint8",	"auto_configure" },
+    { COMMENT, "/* proxy auto discovery */", 0 }, /* http://www.wpad.com/draft-ietf-wrec-wpad-01.txt */
+    { 252,	"string",	"proxy_auto_discovery_url" },
     { END, 0, 0 },
 };
 
@@ -362,12 +360,12 @@ main(int argc, char * argv[])
 	printf("} dhcptype_t;\n\n");
 	printf("typedef struct {\n"
 	       "    dhcptype_t	type;\n"
-	       "    unsigned char *	name;\n"
+	       "    const char *	name;\n"
 	       "} dhcptag_info_t;\n\n");
 	printf("typedef struct {\n"
 	       "    int		size;  /* in bytes */\n"
 	       "    int		multiple_of; /* type of element */\n"
-	       "    unsigned char * name;\n"
+	       "    const char * name;\n"
 	       "} dhcptype_info_t;\n\n");
 	printf("#endif _S_DHCP_TYPE\n");
 	break;
@@ -376,7 +374,7 @@ main(int argc, char * argv[])
 	print_copyright_header(argv[0], argv[1]);
 	printf("#ifndef _S_DHCP_PARSE_TABLE\n"
 	       "#define _S_DHCP_PARSE_TABLE\n");
-	printf("static dhcptag_info_t dhcptag_info_table[] = {\n");
+	printf("static const dhcptag_info_t dhcptag_info_table[] = {\n");
 	for (i = 0; i <= LAST_TAG; i++) {
 	    int 	opt;
 	    int 	type;
@@ -395,7 +393,7 @@ main(int argc, char * argv[])
 	}
 	printf("};\n\n");
 	
-	printf("static dhcptype_info_t dhcptype_info_table[] = {\n");
+	printf("static const dhcptype_info_t dhcptype_info_table[] = {\n");
 	for (i = 0; types[i].name; i++) {
 	    char * type = types[i].multiple_of;
 	    

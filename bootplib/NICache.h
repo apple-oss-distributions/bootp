@@ -5,8 +5,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -30,9 +28,9 @@
  * - netinfo cache routines
  */
 
-#import "netinfo.h"
-#import "dynarray.h"
-#import "NIDomain.h"
+#include "netinfo.h"
+#include "dynarray.h"
+#include "NIDomain.h"
 
 struct PLCacheEntry;
 typedef struct PLCacheEntry PLCacheEntry_t;

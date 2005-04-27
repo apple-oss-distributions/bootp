@@ -3,11 +3,9 @@
 #define _S_TIMER_H
 
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -43,24 +41,17 @@
 #define CFRUNLOOP_NEW_API	1
 #endif
 
-#include <CoreFoundation/CFRunLoop.h>
 #include "dynarray.h"
+
+typedef unsigned long time_interval_t;
+typedef long absolute_time_t;
 
 typedef struct timer_callout timer_callout_t;
 
 typedef void (timer_func_t)(void * arg1, void * arg2, void * arg3);
 
-struct timer_callout {
-    timer_func_t *	func;
-    void *		arg1;
-    void *		arg2;
-    void *		arg3;
-    CFRunLoopTimerRef	timer_source;
-    boolean_t		enabled;
-};
-
 struct timeval		timer_current_time();
-long			timer_current_secs();
+absolute_time_t		timer_current_secs();
 
 /**
  ** callout functions

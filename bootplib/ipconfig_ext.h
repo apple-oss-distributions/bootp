@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -25,10 +23,9 @@
 
 #define IPCONFIG_SERVER		"com.apple.network.IPConfiguration"
 
-#import <mach/mach_init.h>
-#import <servers/bootstrap.h>
+#include <mach/mach_init.h>
+#include <servers/bootstrap.h>
 
-#ifdef MOSX
 static __inline__ kern_return_t
 ipconfig_server_port(mach_port_t * server, boolean_t * active)
 {
@@ -40,17 +37,3 @@ ipconfig_server_port(mach_port_t * server, boolean_t * active)
 	return (status);
     return(bootstrap_look_up(bootstrap_port, IPCONFIG_SERVER, server));
 }
-#else MOSX
-static __inline__ kern_return_t
-ipconfig_server_port(port_t * server, boolean_t * active)
-{
-    kern_return_t	status;
-
-    *active = FALSE;
-    status = bootstrap_status(bootstrap_port, IPCONFIG_SERVER, active);
-    if (status != BOOTSTRAP_SUCCESS)
-	return (status);
-
-    return(bootstrap_look_up(bootstrap_port, IPCONFIG_SERVER, server));
-}
-#endif MOSX

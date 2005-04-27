@@ -6,8 +6,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -69,6 +67,9 @@
 #define NIPROP_NETBOOT_AFP_USER	"afp_user"
 #define NIPROP_NETBOOT_ARCH	"arch"
 #define NIPROP_NETBOOT_IMAGE_ID	"image_id"
+#define NIPROP_NETBOOT_IMAGE_INDEX "image_index"
+#define NIPROP_NETBOOT_IMAGE_KIND "image_kind"
+#define NIPROP_NETBOOT_IMAGE_IS_INSTALL "image_is_install"
 #define NIPROP_NETBOOT_NUMBER	"number"
 #define NIPROP_NETBOOT_SYSID	"sysid"
 #define NIPROP_NETBOOT_LAST_BOOT_TIME	"last_boot_time"

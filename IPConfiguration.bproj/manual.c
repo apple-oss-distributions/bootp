@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999, 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -88,7 +86,7 @@ manual_cancel_pending_events(Service_t * service_p)
 	timer_cancel(manual->timer);
     }
     if (manual->arp) {
-	arp_cancel_probe(manual->arp);
+	arp_client_cancel_probe(manual->arp);
     }
     return;
 }
@@ -118,11 +116,23 @@ manual_start(Service_t * service_p, IFEventID_t evid, void * event_data)
 
     switch (evid) {
       case IFEventID_start_e: {
+	  if (manual->arp == NULL) {
+	      /* if the link is up, just assign the IP */
+	      if (service_link_status(service_p)->valid == TRUE 
+		  && service_link_status(service_p)->active == FALSE) {
+		  manual_inactive(service_p);
+		  break;
+	      }
+	      (void)service_set_address(service_p, manual->our_ip, 
+					manual->our_mask, G_ip_zeroes);
+	      service_publish_success(service_p, NULL, 0);
+	      break;
+	  }
 	  manual_cancel_pending_events(service_p);
-	  arp_probe(manual->arp, 
-		    (arp_result_func_t *)manual_start, service_p,
-		    (void *)IFEventID_arp_e, G_ip_zeroes,
-		    manual->our_ip);
+	  arp_client_probe(manual->arp, 
+			   (arp_result_func_t *)manual_start, service_p,
+			   (void *)IFEventID_arp_e, G_ip_zeroes,
+			   manual->our_ip);
 	  break;
       }
       case IFEventID_arp_e: {
@@ -221,12 +231,9 @@ manual_thread(Service_t * service_p, IFEventID_t evid, void * event_data)
 	      goto stop;
 	  }
 	  manual->arp = arp_client_init(G_arp_session, if_p);
-					
 	  if (manual->arp == NULL) {
-	      my_log(LOG_ERR, "MANUAL %s: arp_client_init failed", 
+	      my_log(LOG_INFO, "MANUAL %s: arp_client_init failed", 
 		     if_name(if_p));
-	      status = ipconfig_status_allocation_failed_e;
-	      goto stop;
 	  }
 	  my_log(LOG_DEBUG, "MANUAL %s: starting", 
 		 if_name(if_p));

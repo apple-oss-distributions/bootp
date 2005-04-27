@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -143,7 +141,7 @@ DHCPLeases_reclaim(DHCPLeases_t * leases, interface_t * if_p,
 	    if (lease_nl_p->ninl_len == 0) {
 		continue;
 	    }
-	    expiry = strtol(lease_nl_p->ninl_val[0], NULL, NULL);
+	    expiry = strtol(lease_nl_p->ninl_val[0], NULL, 0);
 	    if (expiry == LONG_MAX && errno == ERANGE) {
 		continue;
 	    }
@@ -255,7 +253,7 @@ S_lease_time_expiry(ni_proplist * pl_p)
     ni_name 		str = S_lease_propval(pl_p);
 
     if (str) {
-	expiry = strtol(str, NULL, NULL);
+	expiry = strtol(str, NULL, 0);
 	if (expiry == LONG_MAX && errno == ERANGE) {
 	    my_log(LOG_INFO, "S_lease_time_expiry: lease '%s' bad", str);
 	    return (0);
@@ -278,14 +276,14 @@ lease_from_subnet(id subnet, dhcp_lease_t * min_lease,
     *max_lease = max_lease_length;
     nl_p = [subnet lookup:SUBNETPROP_LEASE_MIN];
     if (nl_p != NULL && nl_p->ninl_len) {
-	*min_lease = (dhcp_lease_t) strtol(nl_p->ninl_val[0], NULL, NULL);
+	*min_lease = (dhcp_lease_t) strtol(nl_p->ninl_val[0], NULL, 0);
 	if (debug)
 	    printf("min_lease is %d\n", *min_lease); 
     }
 
     nl_p = [subnet lookup:SUBNETPROP_LEASE_MAX];
     if (nl_p != NULL && nl_p->ninl_len) {
-	*max_lease = (dhcp_lease_t) strtol(nl_p->ninl_val[0], NULL, NULL);
+	*max_lease = (dhcp_lease_t) strtol(nl_p->ninl_val[0], NULL, 0);
 	if (debug)
 	    printf("max_lease is %d\n", *max_lease); 
     }
@@ -397,7 +395,7 @@ S_ipinuse(void * arg, struct in_addr ip)
 #define DHCPD_CREATOR		"dhcpd"
 
 static char *
-S_get_hostname(void * hostname_opt, int hostname_opt_len, struct in_addr iaddr)
+S_get_hostname(void * hostname_opt, int hostname_opt_len)
 {
 
     if (hostname_opt && hostname_opt_len > 0) {
@@ -463,9 +461,6 @@ S_find_parameter(u_char * params, int nparams, int param)
     return (FALSE);
 }
 #endif 0
-
-#define TXBUF_SIZE	2048
-static char	txbuf[TXBUF_SIZE];
 
 typedef enum {
     dhcp_binding_none_e = 0,
@@ -601,13 +596,13 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
     void *		hostname_opt = NULL;
     int			hostname_opt_len = 0;
     char *		hostname = NULL;
-    char *		hwstr = NULL;
-    char *		idstr = NULL;
+    u_char *		hwstr = NULL;
+    u_char *		idstr = NULL;
     struct in_addr	iaddr;
     dhcp_lease_t	lease = 0;
     dhcp_time_secs_t	lease_time_expiry = 0;
     int			len;
-    int			max_packet = dhcp_max_message_size(request->options_p);
+    int			max_packet;
     dhcp_lease_t	min_lease = min_lease_length;
     dhcp_lease_t	max_lease = max_lease_length;
     boolean_t		modified = FALSE;
@@ -616,13 +611,19 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
     struct dhcp *	reply = NULL;
     dhcp_msgtype_t	reply_msgtype = dhcp_msgtype_none_e;
     struct dhcp *	rq = request->pkt;
+    u_char		scratch_idstr[128];
+    u_char		scratch_hwstr[sizeof(rq->dp_chaddr) * 3];
     id 			subnet = nil;
     dhcp_lease_t *	suggested_lease = NULL;
     dhcp_cstate_t	state = dhcp_cstate_none_e;
+    char		txbuf[2048];
     boolean_t		use_broadcast = FALSE;
 
     iaddr.s_addr = 0;
-
+    max_packet = dhcp_max_message_size(request->options_p);
+    if (max_packet > sizeof(txbuf)) {
+	max_packet = sizeof(txbuf);
+    }
     /* check for a client identifier */
     cid = dhcpol_find(request->options_p, dhcptag_client_identifier_e, 
 		      &cid_len, NULL);
@@ -638,9 +639,19 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
 	cid_type = rq->dp_htype;
 	cid_len = rq->dp_hlen;
     }
-    idstr = identifierToString(cid_type, cid, cid_len);
-    if (cid_type == 0)
-	hwstr = identifierToString(rq->dp_htype, rq->dp_chaddr, rq->dp_hlen);
+    idstr = identifierToStringWithBuffer(cid_type, cid, cid_len,
+					 scratch_idstr, sizeof(scratch_idstr));
+    if (idstr == NULL) {
+	goto no_reply;
+    }
+    if (cid_type == 0) {
+	hwstr = identifierToStringWithBuffer(rq->dp_htype, rq->dp_chaddr, 
+					     rq->dp_hlen, scratch_hwstr,
+					     sizeof(scratch_hwstr));
+	if (hwstr == NULL) {
+	    goto no_reply;
+	}
+    }
     else {
 	hwstr = idstr;
     }
@@ -932,13 +943,13 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
 		      if (hostname)
 			  free(hostname);
 		      hostname = S_get_hostname(hostname_opt, 
-						hostname_opt_len, iaddr);
+						hostname_opt_len);
 		      ni_set_prop(&entry->pl, NIPROP_NAME, hostname, 
 				  &modified);
 		  }
 		  else if (hostname == NULL) {
 		      hostname = S_get_hostname(hostname_opt, 
-						hostname_opt_len, iaddr);
+						hostname_opt_len);
 		  }
 	      }
 	      if (binding != dhcp_binding_none_e) {
@@ -1050,7 +1061,7 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
 			  free(hostname);
 		      }
 		      hostname = S_get_hostname(hostname_opt, 
-						hostname_opt_len, iaddr);
+						hostname_opt_len);
 		      ni_set_prop(&entry->pl, NIPROP_NAME, hostname, 
 				  &modified);
 		  }
@@ -1276,9 +1287,9 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
 	free(bootfile);
     if (hostname)
 	free(hostname);
-    if (idstr)
+    if (idstr != scratch_idstr)
 	free(idstr);
-    if (hwstr && hwstr != idstr)
+    if (hwstr != NULL && hwstr != idstr && hwstr != scratch_hwstr)
 	free(hwstr);
     return;
 }

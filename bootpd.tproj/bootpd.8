@@ -1,4 +1,4 @@
-.Dd April 16, 2003
+.Dd December 8, 2004
 .Dt BOOTPD 8
 .Os "Mac OS X"
 .Sh NAME
@@ -283,6 +283,8 @@ The Post Office Protocol (POP3) server IP address(es) (option code 70).
 .It Sy dhcp_nntp_server
 The Network News Transport Protocol (NNTP) server IP address(es)
 (option code 71).
+.It Sy dhcp_proxy_auto_discovery_url
+The default Web Proxy Auto Discovery URL (option code 252).
 .El
 .Ss "/config/NetBootServer: NetBoot server configuration"
 This directory contains a number of properties that alter the NetBoot
@@ -508,7 +510,7 @@ The NetBoot server looks for a symbolic link named:
     Library/NetBoot/.sharepoint
 .fi
 .Pp
-at the root of each HFS+ volume.  If the symlink is valid, and points to 
+at the root of each local volume.  If the symlink is valid, and points to 
 a directory, it assumes that the directory contains NetBoot images and 
 that the contents are accessible via TFTP, AFP, NFS, and HTTP.  By convention,
 the directory is named:
@@ -545,10 +547,27 @@ property is also defined (see below).  Optional, default value is false.
 (Boolean) A flag to indicate that the image describes an installation
 image.  Optional, default value is false.
 .It Sy Type
-(String) The type of the image.  The value "Classic" implies that the Kind 
-is Mac OS 9 NetBoot, "NFS" implies the Kind is Mac OS X NetBoot.
+(String) The expected image contents and the mechanism used to
+supply images to the client.  The defined values are:
+.Bl -tag -width BootFileOnly
+.It Classic
+After downloading the boot file via TFTP, the client OS accesses its images
+via AFP.  The \fBSharedImage\fR and \fBPrivateImage\fR properties 
+(defined below) specify the images to use.
+.It NFS
+After downloading the boot files via TFTP, the client OS accesses its "root"
+filesystem via NFS.  The \fBRootPath\fR property (detailed below)
+specifies the path.
+.It HTTP
+After downloading the boot files via TFTP, the client accesses its "root"
+filesystem via HTTP.  The \fBRootPath\fR property (detailed below)
+specifies the path.
+.It BootFileOnly
+The client downloads the boot file(s), and does not require any 
+additional boot image information.
+.El
 .It Sy Kind
-(Integer) The image kind:
+(Integer) The defined image kind values are:
 .Bl -tag -width xxx -compact
 .It 0 = 
 Mac OS 9
@@ -556,8 +575,27 @@ Mac OS 9
 Mac OS X
 .It 2 = 
 Mac OS X Server
+.It 3 =
+Hardware Diagnostics
 .El
-Optional, the default value depends on the \fBType\fR.
+.Pp
+.Pp
+The default \fBKind\fR is determined from the \fBType\fR:
+.Pp
+.Bl -tag -width BootFileOnly -compact
+.It \fBType\fR
+\fBDefault Kind\fR
+.It Classic
+0 - Mac OS 9
+.It NFS 
+1 - Mac OS X
+.It HTTP 
+1 - Mac OS X
+.It BootFileOnly
+none
+.El
+.Pp
+The \fBKind\fR must be specified if the \fBType\fR is \fBBootFileOnly\fR.
 .It Sy Index
 (Integer) The index of the image.  This is a 16-bit value used to differentiate
 between multiple NetBoot images supplied by a server.  There are two value
@@ -615,11 +653,12 @@ Examples:
     http://joe:secret@someserver/Jaguar/Jaguar.dmg
 .fi
 .It Sy SharedImage
-(String) If Type is "Classic", this is the path of the system, or read/write,
+(String) If Type is "Classic", this is the path of the read/write system
 disk image used for Mac OS 9.
 .It Sy PrivateImage
-(String) If Type is "Classic", this is the path of the private, or read-only,
-disk image used for Mac OS 9.  Optional.
+(String) If Type is "Classic", this is the path of the read-only private
+disk image used to store additional applications for Mac OS 9.
+Optional.
 .It Sy SupportsDiskless
 (Boolean) A flag that indicates that the image supports diskless clients,
 and tells the server to allocate resources.  If the Type is "Classic", 
@@ -756,7 +795,7 @@ new user entries to make up the difference.
 .Pp
 Along with the per-client AFP login, the server creates per-client
 directories to store the "shadow" files.  The server creates these
-directories on each HFS+ volume that contains a symbolic link named:
+directories on each local volume that contains a symbolic link named:
 .Pp
 .nf
     Library/NetBoot/.clients
@@ -773,7 +812,7 @@ a valid AFP sharepoint of the same name.  By convention, the directory is named:
 .Pp
 where Y is a unique number starting at zero (0).
 .Pp
-The server "round-robins" client images across each such directory to distribute
+The server "round-robins" client files across each such directory to distribute
 load amongst multiple disk drives to improve overall performance.
 .Pp
 When the server responds to the client's NetBoot request, it ensures that the
@@ -782,6 +821,9 @@ that property high enough avoids having every client fail if the server
 runs out of disk space.   The only clients that fail if the server
 runs out of disk space are those that run of of space in their own
 pre-allocated "shadow" files.
+.Pp
+Note: the server allocates shadow files for Mac OS 9 NetBoot clients 
+only on local HFS volumes.
 .Sh "SEE ALSO"
 .Lp
 .Xr xinetd 8 ,

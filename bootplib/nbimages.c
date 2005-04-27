@@ -4,8 +4,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -106,15 +104,11 @@ myCFStringArrayToCStringArray(CFArrayRef arr, char * buffer, int * buffer_size,
 static int
 cfstring_to_cstring(CFStringRef cfstr, char * str, int len)
 {
-    CFIndex		l;
-    CFIndex		n;
-    CFRange		range;
-
-    range = CFRangeMake(0, CFStringGetLength(cfstr));
-    n = CFStringGetBytes(cfstr, range, kCFStringEncodingMacRoman,
-			 0, FALSE, str, len - 1, &l);
-    str[l] = '\0';
-    return (l);
+    if (CFStringGetCString(cfstr, str, len, kCFStringEncodingUTF8)) {
+	return (TRUE);
+    }
+    *str = '\0';
+    return (FALSE);
 }
 
 /*
@@ -363,6 +357,8 @@ NBImageTypeStr(NBImageType type)
 	return "NFS";
     case kNBImageTypeHTTP:
 	return "HTTP";
+    case kNBImageTypeBootFileOnly:
+	return "BootFile";
     default:
 	return "<unknown>";
     }
@@ -382,7 +378,7 @@ dump_strlist(const char * * strlist, int count)
 static void
 NBImageEntry_print(NBImageEntryRef entry)
 {
-    printf("%-12s %-35.*s 0x%08x %-8s %-12s", 
+    printf("%-12s %-35.*s 0x%08x %-9s %-12s", 
 	   entry->sharepoint.name,
 	   entry->name_length, entry->name,
 	   entry->image_id, 
@@ -410,6 +406,9 @@ NBImageEntry_print(NBImageEntryRef entry)
 	printf(" [ ");
 	dump_strlist(entry->sysids, entry->sysids_count);
 	printf(" ]");
+    }
+    if (entry->filter_only) {
+	printf(" <filter>");
     }
     printf("\n");
     return;
@@ -443,7 +442,7 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 {
     u_int16_t		attr = 0;
     CFStringRef		bootfile;
-    boolean_t		diskless = FALSE;
+    boolean_t		diskless;
     NBImageEntryRef	entry = NULL;
     char *		ent_bootfile = NULL;
     char *		ent_name = NULL;
@@ -452,13 +451,14 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
     char *		ent_root_path = NULL;
     char *		ent_shared = NULL;
     char *		ent_tftp_path = NULL;
-    u_int16_t		idx_val;
+    boolean_t		filter_only;
+    int32_t		idx_val = -1;
     CFNumberRef		idx;
     char *		image_file = NULL;
-    boolean_t		image_is_default = FALSE;
+    boolean_t		image_is_default;
     boolean_t		indirect = FALSE;
     CFNumberRef		kind;
-    int			kind_val = -1;
+    int32_t		kind_val = -1;
     char *		mount_point = NULL;
     CFStringRef		name;
     char *		offset;
@@ -495,6 +495,8 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 					   FALSE);
     diskless = S_get_plist_boolean(plist, kNetBootImageInfoSupportsDiskless, 
 				   FALSE);
+    filter_only = S_get_plist_boolean(plist, kNetBootImageInfoFilterOnly,
+				      FALSE);
     name = CFDictionaryGetValue(plist, kNetBootImageInfoName);
     if (isA_CFString(name) == NULL) {
 	fprintf(stderr, "missing/invalid Name property\n");
@@ -518,8 +520,8 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 
     idx = CFDictionaryGetValue(plist, kNetBootImageInfoIndex);
     if (isA_CFNumber(idx) == NULL
-	|| CFNumberGetValue(idx, kCFNumberSInt16Type, &idx_val) == FALSE
-	|| idx_val == 0) {
+	|| CFNumberGetValue(idx, kCFNumberSInt32Type, &idx_val) == FALSE
+	|| idx_val <= 0 || idx_val > BSDP_IMAGE_INDEX_MAX) {
 	fprintf(stderr, "missing/invalid Index property\n");
 	goto failed;
     }
@@ -530,7 +532,6 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	    kind_val = -1;
 	}
     }
-
     type = CFDictionaryGetValue(plist, kNetBootImageInfoType);
     if (isA_CFString(type) == NULL) {
 	fprintf(stderr, "missing/invalid Type property\n");
@@ -542,7 +543,7 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	if (kind_val == -1) {
 	    kind_val = bsdp_image_kind_MacOS9;
 	}
-	diskless = TRUE;	/* Mac OS 9 supports diskless */
+	diskless = TRUE;	/* Mac OS 9 requires diskless */
     }
     else if (CFEqual(type, kNetBootImageInfoTypeNFS)) {
 	type_val = kNBImageTypeNFS;
@@ -556,14 +557,24 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	    kind_val = bsdp_image_kind_MacOSX;
 	}
     }
+    else if (CFEqual(type, kNetBootImageInfoTypeBootFileOnly)) {
+	type_val = kNBImageTypeBootFileOnly;
+	diskless = FALSE;
+    }
     if (type_val == kNBImageTypeNone) {
 	fprintf(stderr, "unrecognized Type property\n");
 	goto failed;
     }
-
     if (kind_val == -1) {
-	fprintf(stderr, "unrecognized Kind value\n");
+	fprintf(stderr, "missing/unrecognized Kind value\n");
 	goto failed;
+    }
+    if (kind_val == bsdp_image_kind_Diagnostics) {
+	/* if FilterOnly was not set, set it to TRUE */
+	if (CFDictionaryContainsKey(plist, 
+				    kNetBootImageInfoFilterOnly) == FALSE) {
+	    filter_only = TRUE;
+	}
     }
     attr |= bsdp_image_attributes_from_kind(kind_val);
 
@@ -573,8 +584,12 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	fprintf(stderr, "missing/invalid BootFile property\n");
 	goto failed;
     }
-    cfstring_to_cstring(bootfile, tmp, sizeof(tmp));
+    if (cfstring_to_cstring(bootfile, tmp, sizeof(tmp)) == FALSE) {
+	fprintf(stderr, "BootFile could not be converted\n");
+	goto failed;
+    }
     if (stat_file(dir_path, tmp) == FALSE) {
+	fprintf(stderr, "BootFile does not exist\n");
 	goto failed;
     }
     ent_bootfile = strdup(tmp);
@@ -617,8 +632,12 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	    fprintf(stderr, "missing/invalid SharedImage property\n");
 	    goto failed;
 	}
-	cfstring_to_cstring(shared, tmp, sizeof(tmp));
+	if (cfstring_to_cstring(shared, tmp, sizeof(tmp)) == FALSE) {
+	    fprintf(stderr, "SharedImage could not be converted\n");
+	    goto failed;
+	}
 	if (stat_file(dir_path, tmp) == FALSE) {
+	    fprintf(stderr, "SharedImage does not exist\n");
 	    goto failed;
 	}
 	ent_shared = strdup(tmp);
@@ -632,8 +651,8 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	    = isA_CFString(CFDictionaryGetValue(plist, 
 						kNetBootImageInfoPrivateImage));
 	if (private != NULL) {
-	    cfstring_to_cstring(private, tmp, sizeof(tmp));
-	    if (stat_file(dir_path, tmp) == TRUE) {
+	    if (cfstring_to_cstring(private, tmp, sizeof(tmp))
+		&& stat_file(dir_path, tmp)) {
 		ent_private = strdup(tmp);
 		if (ent_private == NULL) {
 		    goto failed;
@@ -649,7 +668,10 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	    fprintf(stderr, "missing/invalid RootPath property\n");
 	    goto failed;
 	}
-	cfstring_to_cstring(root_path, tmp, sizeof(tmp));
+	if (cfstring_to_cstring(root_path, tmp, sizeof(tmp)) == FALSE) {
+	    fprintf(stderr, "RootPath could not be converted\n");
+	    goto failed;
+	}
 	if (stat_file(dir_path, tmp) == TRUE) {
 	    ent_root_path = strdup(tmp);
 	}
@@ -679,7 +701,10 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	    fprintf(stderr, "missing/invalid RootPath property\n");
 	    goto failed;
 	}
-	cfstring_to_cstring(root_path, tmp, sizeof(tmp));
+	if (cfstring_to_cstring(root_path, tmp, sizeof(tmp)) == FALSE) {
+	    fprintf(stderr, "RootPath could not be converted\n");
+	    goto failed;
+	}
 	if (stat_file(dir_path, tmp) == TRUE) {
 	    ent_root_path = strdup(tmp);
 	}
@@ -692,18 +717,21 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 			     server_username, server_password, 
 			     inet_ntoa(server_ip), 
 			     server_port, image_file);
-		} else {
+		}
+		else {
 		    snprintf(path, sizeof(path), "http://%s:%s@%s/%s",
 			     server_username, server_password, 
 			     inet_ntoa(server_ip),
 			     image_file);
 		}
-	    } else {
+	    } 
+	    else {
 		if (server_port != 0) {
 		    snprintf(path, sizeof(path), "http://%s:%d/%s",
 			     inet_ntoa(server_ip), server_port,
 			     image_file);
-		} else {
+		}
+		else {
 		    snprintf(path, sizeof(path), "http://%s/%s",
 			     inet_ntoa(server_ip), image_file);
 		}
@@ -716,6 +744,7 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
 	}
 	string_space += strlen(ent_root_path) + 1;
 	break;
+    case kNBImageTypeBootFileOnly:
     default:
 	break;
     }
@@ -729,6 +758,7 @@ NBImageEntry_create(NBSPEntryRef sharepoint, char * dir_name,
     entry->type = type_val;
     entry->is_default = image_is_default;
     entry->diskless = diskless;
+    entry->filter_only = filter_only;
 
     offset = (char *)(entry + 1);
 
@@ -832,6 +862,25 @@ NBImageEntry_supported_sysid(NBImageEntryRef entry,
 		    sizeof(char *), my_ptrstrcmp) != NULL);
 }
 
+boolean_t
+NBImageEntry_attributes_match(NBImageEntryRef entry,
+			      const u_int16_t * attrs_list, int n_attrs_list)
+{
+    u_int16_t	attrs;
+    int		i;
+
+    if (attrs_list == NULL) {
+	return (!entry->filter_only);
+    }
+    attrs = bsdp_image_attributes(entry->image_id);
+    for (i = 0; i < n_attrs_list; i++) {
+	if (attrs_list[i] == attrs) {
+	    return (TRUE);
+	}
+    }
+    return (FALSE);
+}
+
 static void
 NBImageList_add_default_entry(NBImageListRef image_list,
 			      NBImageEntryRef entry)
@@ -927,7 +976,8 @@ NBImageList_add_images(NBImageListRef image_list, NBSPEntryRef sharepoint)
 }
 
 NBImageEntryRef 
-NBImageList_default(NBImageListRef image_list, const char * sysid)
+NBImageList_default(NBImageListRef image_list, const char * sysid,
+		    const u_int16_t * attrs, int n_attrs)
 {
     int			count;
     dynarray_t *	dlist = &image_list->list;
@@ -937,7 +987,8 @@ NBImageList_default(NBImageListRef image_list, const char * sysid)
     for (i = 0; i < count; i++) {
 	NBImageEntryRef	scan = dynarray_element(dlist, i);
 
-	if (NBImageEntry_supported_sysid(scan, sysid)) {
+	if (NBImageEntry_supported_sysid(scan, sysid)
+	    && NBImageEntry_attributes_match(scan, attrs, n_attrs)) {
 	    return (scan);
 	}
     }
@@ -992,7 +1043,7 @@ NBImageList_print(NBImageListRef image_list)
     int			count;
     int			i;
 
-    printf("%-12s %-35s %-10s %-8s %-12s Image(s)\n", "Sharepoint", "Name",
+    printf("%-12s %-35s %-10s %-9s %-12s Image(s)\n", "Sharepoint", "Name",
 	   "Identifier", "Type", "BootFile");
 
     count = dynarray_count(&image_list->list);
@@ -1007,6 +1058,7 @@ NBImageList_print(NBImageListRef image_list)
 
 #ifdef TEST_NBIMAGES
 #if 0
+#include <stdarg.h>
 #include <syslog.h>
 void
 my_log(int priority, const char *message, ...)

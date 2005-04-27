@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */
 
 #ifndef _S_BSDP_H
 #define _S_BSDP_H
@@ -34,6 +56,7 @@
  *                      reserved:8;
  */
 #define BOOT_IMAGE_ID_NULL	((bsdp_image_id_t)0)
+#define BSDP_IMAGE_INDEX_MAX	0xffff
 #define BSDP_IMAGE_ATTRIBUTES_INSTALL	((u_int16_t)0x8000)
 #define BSDP_IMAGE_ATTRIBUTES_KIND_MASK	((u_int16_t)0x7f00)
 #define BSDP_IMAGE_ATTRIBUTES_KIND_MAX	0x7f
@@ -52,6 +75,7 @@ typedef enum {
     bsdp_image_kind_MacOS9 = 0,
     bsdp_image_kind_MacOSX = 1,
     bsdp_image_kind_MacOSXServer = 2,
+    bsdp_image_kind_Diagnostics = 3,
 } bsdp_image_kind_t;
 
 /* 
@@ -139,10 +163,11 @@ typedef enum {
     bsdptag_selected_boot_image_e	= 8,
     bsdptag_boot_image_list_e		= 9,
     bsdptag_netboot_1_0_firmware_e	= 10,
+    bsdptag_image_attributes_filter_list_e = 11,
 
     /* protocol-specific bounds */
     bsdptag_first_e			= 1,
-    bsdptag_last_e			= 10,
+    bsdptag_last_e			= 11,
 
     /* image-specific */
     bsdptag_shadow_mount_path_e		= 128,	/* string (URL) */
@@ -183,6 +208,8 @@ bsdptag_type(bsdptag_t tag)
     case bsdptag_netboot_1_0_firmware_e:
 	type = dhcptype_none_e;
 	break;
+    case bsdptag_image_attributes_filter_list_e:
+	type = dhcptype_uint16_mult_e;
     default:
 	break;
     }
@@ -192,7 +219,7 @@ bsdptag_type(bsdptag_t tag)
 static __inline__ const char *
 bsdptag_name(bsdptag_t tag)
 {
-    static char * names[] = {
+    static const char * names[] = {
 	NULL,
 	"message type",			/* 1 */
 	"version",			/* 2 */
@@ -204,6 +231,7 @@ bsdptag_name(bsdptag_t tag)
 	"selected boot image",		/* 8 */
 	"boot image list",		/* 9 */
 	"netboot 1.0 firmware",		/* 10 */
+	"image attributes filter list",	/* 11 */
     };
     if (tag >= bsdptag_first_e && tag <= bsdptag_last_e) {
 	return (names[tag]);
@@ -228,10 +256,10 @@ typedef enum {
     bsdp_msgtype_failed_e			= 3,
 } bsdp_msgtype_t;
 
-static __inline__ unsigned char *
+static __inline__ const char *
 bsdp_msgtype_names(bsdp_msgtype_t type)
 {
-    unsigned char * names[] = {
+    static const char * names[] = {
 	"<none>",
 	"LIST",
 	"SELECT",

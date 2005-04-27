@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,8 +38,9 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <ctype.h>
+#include <string.h>
 #include <sys/param.h>
-#include "util.h"
 #include "cfutil.h"
 
 #include <CoreFoundation/CFData.h>
@@ -164,29 +163,3 @@ my_CFPropertyListWriteFile(CFPropertyListRef plist, char * filename)
     return (ret);
 }
 
-Boolean
-DNSHostNameStringIsClean(CFStringRef str)
-{
-    char *		c_str = NULL;
-    Boolean		is_clean = FALSE;
-    CFIndex		len_str = 0;
-
-    len_str = CFStringGetLength(str) + 1;
-    c_str = CFAllocatorAllocate(NULL, len_str, 0);
-    if (c_str == NULL) {
-	goto failed;
-    }
-    if (CFStringGetCString(str, c_str, len_str, 
-			   kCFStringEncodingASCII) == FALSE) {
-	goto failed;
-    }
-    if (dns_hostname_is_clean(c_str) == FALSE) {
-	goto failed;
-    }
-    is_clean = TRUE;
- failed:
-    if (c_str != NULL) {
-	CFAllocatorDeallocate(NULL, c_str);
-    }
-    return (is_clean);
-}

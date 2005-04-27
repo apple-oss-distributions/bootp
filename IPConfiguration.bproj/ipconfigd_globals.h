@@ -2,11 +2,9 @@
 #ifndef _S_IPCONFIGD_GLOBALS_H
 #define _S_IPCONFIGD_GLOBALS_H
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -37,11 +35,7 @@
  * - created
  */
 
-
-#include "timer.h"
-#include "globals.h"
-#include "FDSet.h"
-
-extern FDSet_t *		G_readers;
+extern void my_log(int priority, const char * message, ...);
+extern void timestamp_fprintf(FILE * f, const char * message, ...);
 
 #endif _S_IPCONFIGD_GLOBALS_H

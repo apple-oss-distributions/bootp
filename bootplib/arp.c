@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -123,8 +121,8 @@ static int nflag;
 
 static int	rtmsg __P((int, int, route_msg *, route_options *));
 
-static struct sockaddr_inarp blank_sin = {sizeof(blank_sin), AF_INET };
-static struct sockaddr_dl blank_sdl = {sizeof(blank_sdl), AF_LINK };
+static const struct sockaddr_inarp blank_sin = {sizeof(blank_sin), AF_INET };
+static const struct sockaddr_dl blank_sdl = {sizeof(blank_sdl), AF_LINK };
 
 
 static const char * arperrors[] = {

@@ -3,11 +3,9 @@
 #define _S_ARP_SESSION_H
 
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000 - 2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -47,8 +45,18 @@
  *   Called to send results back to the caller.  The first two args are
  *   supplied by the client, the third is a pointer to an arp_result_t.
  */
-typedef void (arp_result_func_t)(void * arg1, void * arg2, void * arg3);
+typedef void (arp_result_func_t)(void * arg1, void * arg2, 
+				 void * result);
 
+/*
+ * Type: arp_our_address_func_t
+ * Purpose:
+ *   Called to check whether a given hardware address matches any
+ *   of this system's hardware addresses.  A return value of TRUE
+ *   implies the hardware address corresponds to a physical interface on
+ *   this system, and should not be reported as a conflict.  A return of
+ *   FALSE implies the converse, and a conflict should be reported.
+ */
 typedef boolean_t (arp_our_address_func_t)(interface_t * if_p, 
 					   int hwtype, void * hwaddr,
 					   int hwlen);
@@ -58,15 +66,16 @@ typedef struct arp_client arp_client_t;
 typedef struct {
     boolean_t			error;
     boolean_t			in_use;
-    struct in_addr		ip_address;
-    int				hwtype;
-    void *			hwaddr;
-    int				hwlen;
+    const void *		hwaddr;
 } arp_result_t;
 
+
 arp_session_t *
-arp_session_init(arp_our_address_func_t * func, struct timeval * retry_p,
-		 int * probe_count, int * gratuitous_count);
+arp_session_init(FDSet_t * readers,
+		 arp_our_address_func_t * func, 
+		 const struct timeval * retry_p,
+		 const int * probe_count, 
+		 const int * gratuitous_count);
 
 void
 arp_session_free(arp_session_t * * session_p);
@@ -78,21 +87,33 @@ arp_session_set_debug(arp_session_t * session, int debug);
 /**
  ** arp client functions
  **/
+void
+arp_client_set_probes_are_collisions(arp_client_t * client, 
+				     boolean_t probes_are_collisions);
+
 arp_client_t *
 arp_client_init(arp_session_t * session, interface_t * if_p);
 
 void
 arp_client_free(arp_client_t * * client_p);
 
-char *
+void
+arp_client_set_probe_info(arp_client_t * client, 
+			  const struct timeval * retry_interval,
+			  const int * probe_count, 
+			  const int * gratuitous_count);
+void 
+arp_client_restore_default_probe_info(arp_client_t * client);
+
+const char *
 arp_client_errmsg(arp_client_t * client);
 
 void
-arp_probe(arp_client_t * client,
-	  arp_result_func_t * func, void * arg1, void * arg2,
-	  struct in_addr sender_ip, struct in_addr target_ip);
+arp_client_probe(arp_client_t * client,
+		 arp_result_func_t * func, void * arg1, void * arg2,
+		 struct in_addr sender_ip, struct in_addr target_ip);
 
 void
-arp_cancel_probe(arp_client_t * client);
+arp_client_cancel_probe(arp_client_t * client);
 
 #endif _S_ARP_SESSION_H

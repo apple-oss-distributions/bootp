@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -30,16 +28,10 @@ serverprefix _;
 
 import <ipconfig_types.h>;
 
-#ifdef MOSX
 type port_t = mach_port_t;
 type ip_address_t = MACH_MSG_TYPE_INTEGER_32;
 type ipconfig_method_t = MACH_MSG_TYPE_INTEGER_32;
 type ipconfig_status_t = MACH_MSG_TYPE_INTEGER_32;
-#else
-type ip_address_t = MSG_TYPE_INTEGER_32;
-type ipconfig_method_t = MSG_TYPE_INTEGER_32;
-type ipconfig_status_t = MSG_TYPE_INTEGER_32;
-#endif
 
 type if_name_t = array[32] of char;
 type ooline_data_t = ^ array [] of char;
@@ -75,4 +67,15 @@ routine ipconfig_set(		server : port_t;
 				method : ipconfig_method_t;
 				method_data : inline_data_t;
 			 out	status : ipconfig_status_t );
+
+routine ipconfig_set_verbose(	server : port_t;
+				verbose : int;
+			 out	status : ipconfig_status_t );
+#ifdef IPCONFIG_TEST_NO_ENTRY
+routine ipconfig_set_something(	server : port_t;
+				verbose : int;
+			 out	status : ipconfig_status_t );
+#else IPCONFIG_TEST_NO_ENTRY
+	skip;
+#endif IPCONFIG_TEST_NO_ENTRY
 

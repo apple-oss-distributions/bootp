@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -27,7 +25,7 @@
  */
 #ifndef _S_DHCP_PARSE_TABLE
 #define _S_DHCP_PARSE_TABLE
-static dhcptag_info_t dhcptag_info_table[] = {
+static const dhcptag_info_t dhcptag_info_table[] = {
   /*   0 */ { dhcptype_none_e     , "pad" },
   /*   1 */ { dhcptype_ip_e       , "subnet_mask" },
   /*   2 */ { dhcptype_int32_e    , "time_offset" },
@@ -280,13 +278,13 @@ static dhcptag_info_t dhcptag_info_table[] = {
   /* 249 */ { dhcptype_opaque_e   , "option_249" },
   /* 250 */ { dhcptype_opaque_e   , "option_250" },
   /* 251 */ { dhcptype_opaque_e   , "option_251" },
-  /* 252 */ { dhcptype_opaque_e   , "option_252" },
+  /* 252 */ { dhcptype_string_e   , "proxy_auto_discovery_url" },
   /* 253 */ { dhcptype_opaque_e   , "option_253" },
   /* 254 */ { dhcptype_opaque_e   , "option_254" },
   /* 255 */ { dhcptype_none_e     , "end" },
 };
 
-static dhcptype_info_t dhcptype_info_table[] = {
+static const dhcptype_info_t dhcptype_info_table[] = {
   /*  0 */ { 0, dhcptype_none_e, "none"},
   /*  1 */ { 0, dhcptype_none_e, "opaque"},
   /*  2 */ { 1, dhcptype_none_e, "bool"},

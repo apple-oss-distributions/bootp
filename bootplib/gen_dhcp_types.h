@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -48,13 +46,13 @@ typedef enum {
 
 typedef struct {
     dhcptype_t	type;
-    unsigned char *	name;
+    const char *	name;
 } dhcptag_info_t;
 
 typedef struct {
     int		size;  /* in bytes */
     int		multiple_of; /* type of element */
-    unsigned char * name;
+    const char * name;
 } dhcptype_info_t;
 
 #endif _S_DHCP_TYPE

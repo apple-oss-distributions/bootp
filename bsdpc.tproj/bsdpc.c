@@ -3,8 +3,6 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -43,6 +41,7 @@
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
 #include <mach/boolean.h>
+#include <limits.h>
 
 #include "util.h"
 #include "cfutil.h"
@@ -486,7 +485,7 @@ user_input(CFSocketRef s, CFSocketCallBackType type,
 
 
 static void
-initialize(const char * ifname)
+initialize(const char * ifname, u_int16_t * attrs, int n_attrs)
 {
     BSDPClientRef	client;
     CFSocketContext	context = { 0, NULL, NULL, NULL, NULL };
@@ -510,7 +509,8 @@ initialize(const char * ifname)
     my_CFRelease(&rls);
     my_CFRelease(&socket);
 
-    client = BSDPClientCreateWithInterface(&status, ifname);
+    client = BSDPClientCreateWithInterfaceAndAttributes(&status, ifname,
+							attrs, n_attrs);
     if (client == NULL) {
 	fprintf(stderr, "BSDPClientCreateWithInterface(%s) failed, %s\n",
 		ifname, BSDPClientStatusString(status));
@@ -530,17 +530,68 @@ initialize(const char * ifname)
     return;
 }
 
+void
+usage(u_char * progname)
+{
+    fprintf(stderr, "usage: %s <options>\n"
+	    "<options> are:\n"
+	    "-i interface : interface name to do BSDP over, default is en0\n"
+	    "-F attrs     : attributes filter\n",
+	    progname);
+    exit(1);
+}
+
+#define MAX_ATTRS	10
+
 int
 main(int argc, char * argv[])
 {
-    const char * ifname;
+    int			ch;
+    const char * 	ifname = NULL;
+    u_int16_t		attrs[MAX_ATTRS];
+    int			n_attrs = 0;
+    long		val;
 
-    ifname = "en0";
-    if (argc > 1) {
-	ifname = argv[1];
+    while ((ch = getopt(argc, argv, "F:i:")) != EOF) {
+	switch (ch) {
+	case 'i':
+	    if (ifname != NULL) {
+		fprintf(stderr, "can't specify interface more than once\n");
+		exit(1);
+	    }
+	    ifname = optarg;
+	    break;
+	case 'F':
+	    errno = 0;
+	    if (n_attrs == MAX_ATTRS) {
+		fprintf(stderr, "too many attributes passed\n");
+		exit(1);
+	    }
+	    val = strtol(optarg, NULL, 0);
+	    if (errno != 0 || val < 0 || val > 65535) {
+		fprintf(stderr, "bad attribute value passed\n");
+		exit(1);
+	    }
+	    attrs[n_attrs++] = val;
+	    break;
+	default:
+	    break;
+	}
     }
+    if ((argc - optind) != 0) {
+	usage(argv[0]);
+    }
+    if (ifname == NULL) {
+	ifname = "en0";
+    }
+
     printf("Discovering NetBoot servers...\n");
-    initialize(ifname);
+    if (n_attrs == 0) {
+	initialize(ifname, NULL, 0);
+    }
+    else {
+	initialize(ifname, attrs, n_attrs);
+    }
     CFRunLoopRun();
     printf("CFRunLoop done\n");
     exit(0);
