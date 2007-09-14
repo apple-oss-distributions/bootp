@@ -30,6 +30,7 @@
 #ifndef _S_NBIMAGES_H
 #define _S_NBIMAGES_H
 
+#include <net/ethernet.h>
 #include "nbsp.h"
 #include "bsdp.h"
 #include <sys/types.h>
@@ -45,27 +46,29 @@ typedef enum {
 typedef union {
     struct {
 	boolean_t	indirect;
-	char *		root_path;
+	const char *	root_path;
     } nfs;
     struct {
 	boolean_t	indirect;
-	char *		root_path;
+	const char *	root_path;
     } http;
     struct {
-	char *		shared;
-	char *		private;
+	const char *	shared;
+	const char *	private;
     } classic;
 } NBImageTypeInfo;
 
 typedef struct {
-    NBSPEntry		sharepoint;
+    NBSPEntryRef	sharepoint;
+    const char *	arch;
+    const char * *	archlist;
+    int			archlist_count;
     char *		dir_name;	/* relative to sharepoint */
-    char *		name;		/* not nul-terminated */
+    char *		name;
     int			name_length;
     bsdp_image_id_t	image_id;
-    char *		bootfile;
-    char *		tftp_path;
-    bsdp_image_kind_t	kind;
+    const char *	bootfile;
+    boolean_t		ppc_bootfile_no_subdir;
     NBImageType		type;
     NBImageTypeInfo	type_info;
     boolean_t		is_default;
@@ -73,20 +76,30 @@ typedef struct {
     boolean_t		filter_only;
     const char * *	sysids;
     int			sysids_count;
+    const struct ether_addr *	enabled_mac_addresses;
+    int			enabled_mac_addresses_count;
+    const struct ether_addr *	disabled_mac_addresses;
+    int			disabled_mac_addresses_count;
+    struct in_addr	load_balance_ip;
 } NBImageEntry, * NBImageEntryRef;
 
 boolean_t	NBImageEntry_supported_sysid(NBImageEntryRef entry, 
-					     const char * sysid);
+					     const char * arch,
+					     const char * sysid,
+					     const struct ether_addr * ether_addr);
 struct NBImageList_s;
 typedef struct NBImageList_s * NBImageListRef;
 
 int		NBImageList_count(NBImageListRef list);
 NBImageEntryRef	NBImageList_element(NBImageListRef list, int i);
 NBImageEntryRef NBImageList_elementWithID(NBImageListRef list, bsdp_image_id_t);
-NBImageListRef	NBImageList_init(NBSPListRef sharepoints);
+NBImageListRef	NBImageList_init(NBSPListRef sharepoints,
+				 boolean_t allow_diskless);
 void		NBImageList_free(NBImageListRef * list);
 void		NBImageList_print(NBImageListRef images);
-NBImageEntryRef NBImageList_default(NBImageListRef images, const char * sysid,
+NBImageEntryRef NBImageList_default(NBImageListRef images, 
+				    const char * arch, const char * sysid,
+				    const struct ether_addr * ether,
 				    const u_int16_t * attrs, int n_attrs);
 boolean_t	NBImageEntry_attributes_match(NBImageEntryRef entry,
 					      const u_int16_t * attrs,

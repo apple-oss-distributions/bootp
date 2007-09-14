@@ -23,6 +23,7 @@
 
 #include <CoreFoundation/CFString.h>
 
+#define kNetBootImageInfoArchitectures	CFSTR("Architectures")	/* Array[String] */
 #define kNetBootImageInfoIndex		CFSTR("Index")		/* Number */
 #define kNetBootImageInfoIsEnabled	CFSTR("IsEnabled") 	/* Boolean */
 #define kNetBootImageInfoIsInstall	CFSTR("IsInstall")	/* Boolean */
@@ -34,6 +35,9 @@
 #define kNetBootImageInfoSupportsDiskless CFSTR("SupportsDiskless") /* Boolean */
 #define kNetBootImageInfoEnabledSystemIdentifiers CFSTR("EnabledSystemIdentifiers") /* Array[String] */
 #define kNetBootImageInfoFilterOnly 	CFSTR("FilterOnly")	/* Boolean */
+#define kNetBootImageInfoEnabledMACAddresses CFSTR("EnabledMACAddresses") /* Array[String] */
+#define kNetBootImageInfoDisabledMACAddresses CFSTR("DisabledMACAddresses") /* Array[String] */
+#define kNetBootImageLoadBalanceServer 	CFSTR("LoadBalanceServer") /* String */
 
 
 /* Type values */
