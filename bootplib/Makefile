@@ -25,7 +25,7 @@ readtest:
 	cc -Wall -g -o readtest -DREAD_TEST NICache.c dynarray.c ptrlist.c netinfo.c host_identifier.c util.c
 
 arp: arp.c arp.h
-	cc -Wall -g -o arp -DMAIN arp.c
+	cc -Wall -g -o arp -DMAIN arp.c -I/System/Library/Frameworks/System.framework/PrivateHeaders
 
 nihosts:
 	cc -Wall -g -o nihosts -DTEST_NIHOSTS NIHosts.m util.c NIDomain.c dynarray.c ptrlist.c netinfo.c host_identifier.c
@@ -46,14 +46,17 @@ hfsvols: hfsvols.c hfsvols.h
 	cc -Wall -g -DTEST_HFSVOLS -o hfsvols hfsvols.c ptrlist.c dynarray.c
 
 nbimages: nbimages.c nbimages.h cfutil.c
-	cc -arch i386 -arch ppc -Wall -g -DTEST_NBIMAGES -o nbimages nbimages.c util.c nbsp.c ptrlist.c dynarray.c cfutil.c -framework CoreFoundation -I$(NET_ROOT)$(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/PrivateHeaders
+	cc -Wall -g -DTEST_NBIMAGES -o nbimages nbimages.c util.c nbsp.c ptrlist.c dynarray.c cfutil.c -framework CoreFoundation -I$(NET_ROOT)$(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/PrivateHeaders
 
 dnsnamelist: DNSNameList.c DNSNameList.h
-	cc -arch i386 -arch ppc -Wall -g -DTEST_DNSNAMELIST -o dnsnamelist DNSNameList.c util.c
+	cc -Wall -g -DTEST_DNSNAMELIST -o dnsnamelist DNSNameList.c util.c
 
 subnets: subnets.c cfutil.c DNSNameList.c util.c ptrlist.c dynarray.c dhcp_options.c
-	cc -arch i386 -arch ppc -g -Wall -DTEST_SUBNETS -o subnets subnets.c cfutil.c util.c ptrlist.c dynarray.c DNSNameList.c dhcp_options.c -framework CoreFoundation
+	cc -g -Wall -DTEST_SUBNETS -o subnets subnets.c cfutil.c util.c ptrlist.c dynarray.c DNSNameList.c dhcp_options.c -framework CoreFoundation
+
+test-dhcpv6-options: DHCPv6Options.c DHCPv6.c DHCPDUID.c
+	cc -g -Wall DHCPv6Options.c DHCPDUID.c DHCPv6.c -o test-dhcpv6-options -DTEST_DHCPV6_OPTIONS ptrlist.c util.c DNSNameList.c cfutil.c -framework CoreFoundation
 
 clean:
-	rm -f afpusers arp dhcpopt dnsnamelist genoptionfiles hfsvols interfaces nbimages nbsp nihosts nilist readtest sharepoints subnets
+	rm -f afpusers arp dhcpopt dnsnamelist genoptionfiles hfsvols interfaces nbimages nbsp nihosts nilist readtest sharepoints subnets test-dhcpv6-options
 	rm -rf *.dSYM/
