@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2006 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2013 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -840,6 +840,36 @@ image_server_ip(NBImageEntryRef image_entry, struct in_addr server_ip)
 }
 
 static boolean_t
+escape_password(const char * password, int password_length, 
+		char * escaped_password, int escaped_password_length)
+{
+    boolean_t	escaped = FALSE;
+    CFStringRef	pass_str;
+    CFStringRef	str;
+
+#define PUNCTUATION  CFSTR(CHARSET_SYMBOLS)
+    pass_str = CFStringCreateWithCString(NULL, password, kCFStringEncodingUTF8);
+    str = CFURLCreateStringByAddingPercentEscapes(NULL,
+						  pass_str, 
+						  NULL,
+						  PUNCTUATION,
+						  kCFStringEncodingUTF8);
+    CFRelease(pass_str);
+    if (CFStringGetCString(str,
+			   escaped_password,
+			   escaped_password_length,
+			   kCFStringEncodingUTF8)) {
+	escaped = TRUE;
+    }
+    else {
+	my_log(LOG_NOTICE, "failed to URL escape password");
+    }
+    CFRelease(str);
+    return (escaped);
+
+}
+
+static boolean_t
 X_netboot(NBImageEntryRef image_entry, struct in_addr server_ip,
 	  const char * hostname, int host_number, uid_t uid,
 	  const char * afp_user, const char * password,
@@ -892,6 +922,8 @@ X_netboot(NBImageEntryRef image_entry, struct in_addr server_ip,
 	return (FALSE);
     }
     if (image_entry->diskless) {
+	char 		escaped_password[3 * AFP_PASSWORD_LEN + 1];
+	const char *	passwd;
 	char 		shadow_mount_path[256];
 	char 		shadow_path[256];
 	NBSPEntry *	vol;
@@ -902,9 +934,16 @@ X_netboot(NBImageEntryRef image_entry, struct in_addr server_ip,
 	if (vol == NULL) {
 	    return (FALSE);
 	}
-	snprintf(shadow_mount_path, sizeof(shadow_mount_path), 
+	if (escape_password(password, strlen(password),
+			    escaped_password, sizeof(escaped_password))) {
+	    passwd = escaped_password;
+	}
+	else {
+	    passwd = password;
+	}
+	snprintf(shadow_mount_path, sizeof(shadow_mount_path),
 		 "afp://%s:%s@%s/%s",
-		 afp_user, password, inet_ntoa(server_ip), vol->name);
+		 afp_user, passwd, inet_ntoa(server_ip), vol->name);
 	if (dhcpoa_vendor_add(options, bsdp_options, 
 			      bsdptag_shadow_mount_path_e,
 			      strlen(shadow_mount_path), shadow_mount_path)
@@ -1045,7 +1084,6 @@ S_client_update(struct in_addr * client_ip_p, const char * arch,
     default:
 	my_log(LOG_INFO, "NetBoot: invalid type %d", image_entry->type);
 	return (FALSE);
-	break;
     }
     if (S_add_bootfile(image_entry, arch, hostname, 
 		       (char *)reply->dp_file, sizeof(reply->dp_file))
@@ -1055,10 +1093,10 @@ S_client_update(struct in_addr * client_ip_p, const char * arch,
     {
 	char	buf[32];
 
-	sprintf(buf, "0x%x", image_id);
+	snprintf(buf, sizeof(buf), "0x%x", image_id);
 	ni_set_prop(&entry->pl, NIPROP_NETBOOT_IMAGE_ID, buf, &modified);
 
-	sprintf(buf, "0x%x", (unsigned)time_in_p->tv_sec);
+	snprintf(buf, sizeof(buf), "0x%x", (unsigned)time_in_p->tv_sec);
 	ni_set_prop(&entry->pl, NIPROP_NETBOOT_LAST_BOOT_TIME, buf, &modified);
 
     }
@@ -1097,7 +1135,7 @@ S_client_create(struct in_addr client_ip,
     host_number = S_next_host_number;
     NI_INIT(&pl);
 
-    sprintf(hostname, S_machine_name_format, host_number);
+    snprintf(hostname, sizeof(hostname), S_machine_name_format, host_number);
     ni_proplist_addprop(&pl, NIPROP_NAME, (ni_name)hostname);
     ni_proplist_addprop(&pl, NIPROP_IDENTIFIER, (ni_name)idstr);
     ni_proplist_addprop(&pl, NIPROP_NETBOOT_ARCH, (char *)arch);
@@ -1105,11 +1143,11 @@ S_client_create(struct in_addr client_ip,
     {
 	char buf[32];
 
-	sprintf(buf, "0x%x", image_id);
+	snprintf(buf, sizeof(buf), "0x%x", image_id);
 	ni_proplist_addprop(&pl, NIPROP_NETBOOT_IMAGE_ID, (ni_name)buf);
-	sprintf(buf, "%d", host_number);
+	snprintf(buf, sizeof(buf), "%d", host_number);
 	ni_proplist_addprop(&pl, NIPROP_NETBOOT_NUMBER, (ni_name)buf);
-	sprintf(buf, "0x%x", (unsigned)time_in_p->tv_sec);
+	snprintf(buf, sizeof(buf), "0x%x", (unsigned)time_in_p->tv_sec);
 	ni_proplist_addprop(&pl, NIPROP_NETBOOT_LAST_BOOT_TIME, buf);
     }
     ni_proplist_addprop(&pl, NIPROP_IPADDR, inet_ntoa(client_ip));
@@ -1158,7 +1196,6 @@ S_client_create(struct in_addr client_ip,
     default:
 	my_log(LOG_INFO, "NetBoot: invalid type %d", image_entry->type);
 	goto failed;
-	break;
     }
     if (S_add_bootfile(image_entry, arch, hostname, 
 		       (char *)reply->dp_file, sizeof(reply->dp_file))
@@ -1340,7 +1377,6 @@ is_bsdp_packet(dhcpol_t * rq_options, char * arch, char * sysid,
 		   *client_version);
 	}
 	goto failed;
-	break;
     }
     if (client_version == BSDP_VERSION_0_0
 	|| (dhcpol_find(rq_vsopt, bsdptag_netboot_1_0_firmware_e, NULL, NULL)
@@ -1644,7 +1680,8 @@ bsdp_request(request_t * request, dhcp_msgtype_t dhcpmsg,
 	      }
 	      else {
 		  reply->dp_siaddr = if_inet_addr(request->if_p);
-		  strcpy((char *)reply->dp_sname, server_name);
+		  strlcpy((char *)reply->dp_sname, server_name, 
+			  sizeof(reply->dp_sname));
 	      }
 
 	      size = sizeof(struct dhcp) + sizeof(rfc_magic) +
@@ -1965,7 +2002,8 @@ bsdp_request(request_t * request, dhcp_msgtype_t dhcpmsg,
 		}
 		else {
 		    reply->dp_siaddr = if_inet_addr(request->if_p);
-		    strcpy((char *)reply->dp_sname, server_name);
+		    strlcpy((char *)reply->dp_sname, server_name, 
+			    sizeof(reply->dp_sname));
 		}
 		break;
 	    }
@@ -1976,7 +2014,6 @@ bsdp_request(request_t * request, dhcp_msgtype_t dhcpmsg,
 			   idstr, msgtype);
 		}
 		goto no_reply;
-		break;
 	    }
 	  }
 	  goto send_reply;
@@ -2035,7 +2072,6 @@ bsdp_request(request_t * request, dhcp_msgtype_t dhcpmsg,
 		     idstr, dhcp_msgtype_names(dhcpmsg));
 	  }
 	  goto no_reply;
-	  break;
       }
     }
 
@@ -2195,7 +2231,8 @@ old_netboot_request(request_t * request)
 	}
 	else {
 	    reply->dp_siaddr = if_inet_addr(request->if_p);
-	    strcpy((char *)reply->dp_sname, server_name);
+	    strlcpy((char *)reply->dp_sname, server_name,
+		    sizeof(reply->dp_sname));
 	}
 	size = sizeof(struct dhcp) + sizeof(rfc_magic) +
 	    dhcpoa_used(&options);
