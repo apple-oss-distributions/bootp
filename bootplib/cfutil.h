@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -53,10 +53,13 @@ my_CFStringArrayToEtherArray(CFArrayRef array, char * buffer, int * buffer_size,
 bool
 my_CFStringToIPAddress(CFStringRef str, struct in_addr * ret_ip);
 
+bool
+my_CFStringToIPv6Address(CFStringRef str, struct in6_addr * ret_ip);
+
 int
 my_CFStringToCStringAndLengthExt(CFStringRef cfstr, char * str, int len,
 				 boolean_t is_external);
-static __inline__ int
+INLINE int
 my_CFStringToCStringAndLength(CFStringRef cfstr, char * str, int len)
 {
     return (my_CFStringToCStringAndLengthExt(cfstr, str, len, FALSE));
@@ -103,5 +106,8 @@ my_CFEqual(CFTypeRef val1, CFTypeRef val2);
 
 CFArrayRef
 my_CFStringArrayCreate(const char * * strings, CFIndex strings_count);
+
+CFStringRef
+my_CFUUIDStringCreate(CFAllocatorRef alloc);
 
 #endif /* _S_CFUTIL_H */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2002, 2011 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -321,6 +321,25 @@ my_CFStringToIPAddress(CFStringRef str, struct in_addr * ret_ip)
 }
 
 PRIVATE_EXTERN bool
+my_CFStringToIPv6Address(CFStringRef str, struct in6_addr * ret_ip)
+{
+    char		buf[64];
+
+    bzero(ret_ip, sizeof(*ret_ip));
+    if (isA_CFString(str) == NULL) {
+	return (FALSE);
+    }
+    if (CFStringGetCString(str, buf, sizeof(buf), kCFStringEncodingASCII)
+	== FALSE) {
+	return (FALSE);
+    }
+    if (inet_pton(AF_INET6, buf, ret_ip) == 1) {
+	return (TRUE);
+    }
+    return (FALSE);
+}
+
+PRIVATE_EXTERN bool
 my_CFStringToNumber(CFStringRef str, uint32_t * ret_val)
 {
     char		buf[64];
@@ -516,3 +535,14 @@ my_CFStringToCString(CFStringRef cfstr, CFStringEncoding encoding)
     return ((char *)str);
 }
 
+PRIVATE_EXTERN CFStringRef
+my_CFUUIDStringCreate(CFAllocatorRef alloc)
+{
+    CFUUIDRef 	uuid;
+    CFStringRef	uuid_str;
+
+    uuid = CFUUIDCreate(alloc);
+    uuid_str = CFUUIDCreateString(alloc, uuid);
+    CFRelease(uuid);
+    return (uuid_str);
+}
