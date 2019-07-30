@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2017 Apple Inc. All rights reserved.
+ * Copyright (c) 2000-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -48,6 +48,7 @@
 #include "dhcp_thread.h"
 #include "DHCPv6Options.h"
 #include "ifutil.h"
+#include "symbol_scope.h"
 
 #define kNetworkSignature	CFSTR("NetworkSignature")
 
@@ -71,6 +72,8 @@ typedef enum {
     IFEventID_bssid_changed_e, 		/* BSSID has changed */
     IFEventID_active_during_sleep_e,	/* (active_during_sleep_t) */
     IFEventID_ipv6_router_expired_e,	/* (ipv6_router_prefix_counts_t) */
+    IFEventID_plat_discovery_complete_e,/* (boolean_t *) */
+    IFEventID_forget_ssid_e,		/* forget SSID */
 } IFEventID_t;
 
 typedef struct ServiceInfo * ServiceRef;
@@ -109,7 +112,7 @@ typedef struct {
  *   Perform some cursory checks on the IP address
  *   supplied by the server
  */
-static __inline__ boolean_t
+INLINE boolean_t
 ip_valid(struct in_addr ip)
 {
     if (ip.s_addr == 0
@@ -277,19 +280,6 @@ ServiceRemoveIPv6Address(ServiceRef service_p,
 boolean_t
 ServiceDADIsEnabled(ServiceRef service_p);
 
-#if TARGET_OS_EMBEDDED
-static __inline__ void
-ServiceReportIPv6AddressConflict(ServiceRef service_p,
-				 const struct in6_addr * addr_p)
-{
-    /* nothing to do */
-}
-#else  /* TARGET_OS_EMBEDDED */
-void
-ServiceReportIPv6AddressConflict(ServiceRef service_p,
-				 const struct in6_addr * addr_p);
-#endif /* TARGET_OS_EMBEDDED */
-
 void
 ServiceGenerateFailureSymptom(ServiceRef service_p);
 
@@ -300,27 +290,50 @@ void
 service_publish_failure_sync(ServiceRef service_p, ipconfig_status_t status,
 			     boolean_t sync);
 
-#if TARGET_OS_EMBEDDED
-static __inline__ void
-ServiceReportIPv4AddressConflict(ServiceRef service_p, struct in_addr ip)
-{
-    /* nothing to do */
-}
-
-static __inline__ void
-ServiceRemoveAddressConflict(ServiceRef service_p)
-{
-    /* nothing to do */
-}
-
-#else /* TARGET_OS_EMBEDDED */
+#if TARGET_OS_OSX
 void
 ServiceReportIPv4AddressConflict(ServiceRef service_p, struct in_addr ip);
 
 void
 ServiceRemoveAddressConflict(ServiceRef service_p);
 
-#endif /* TARGET_OS_EMBDEDDED */
+void
+ServiceReportIPv6AddressConflict(ServiceRef service_p,
+				 const struct in6_addr * addr_p);
+
+#else /* TARGET_OS_OSX */
+
+INLINE void
+ServiceReportIPv4AddressConflict(ServiceRef service_p, struct in_addr ip)
+{
+    /* nothing to do */
+}
+
+INLINE void
+ServiceRemoveAddressConflict(ServiceRef service_p)
+{
+    /* nothing to do */
+}
+
+INLINE void
+ServiceReportIPv6AddressConflict(ServiceRef service_p,
+				 const struct in6_addr * addr_p)
+{
+    /* nothing to do */
+}
+
+#endif /* TARGET_OS_OSX */
+
+CFStringRef
+ServiceGetInterfaceName(ServiceRef service_p);
+
+/**
+ ** 464XLAT routines
+ **/
+boolean_t	service_clat46_is_enabled(ServiceRef service_p);
+boolean_t	service_nat64_prefix_available(ServiceRef service_p);
+boolean_t	service_plat_discovery_failed(ServiceRef service_p);
+
 
 /**
  ** router_arp routines

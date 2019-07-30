@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2013-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,8 +22,8 @@
  */
 
 /*
- * IPv6Socket.c
- * - common functions for creating/sending packets over IPv6 sockets
+ * ICMPv6Socket.c
+ * - common functions for creating/sending packets over ICMPv6 sockets
  */
 
 /* 
@@ -58,6 +58,7 @@
 #include <netinet/icmp6.h>
 #include <sys/uio.h>
 #include "IPConfigurationLog.h"
+#include "ICMPv6Socket.h"
 #include "IPv6Socket.h"
 #include "IPv6Sock_Compat.h"
 #include "symbol_scope.h"
@@ -66,68 +67,6 @@
 #define BUF_SIZE_NO_HLIM 	CMSG_SPACE(sizeof(struct in6_pktinfo))
 #define BUF_SIZE		(BUF_SIZE_NO_HLIM + CMSG_SPACE(sizeof(int)))
 
-PRIVATE_EXTERN int
-IPv6SocketSend(int sockfd, int ifindex, const struct sockaddr_in6 * dest,
-	       const void * pkt, int pkt_size, int hlim)
-{
-    struct cmsghdr *	cm;
-    char		cmsgbuf[BUF_SIZE];
-    struct iovec 	iov;
-    struct msghdr 	mhdr;
-    ssize_t		n;
-    struct in6_pktinfo *pi;
-    int			ret;
-
-    /* initialize msghdr for sending packets */
-    iov.iov_base = (caddr_t)pkt;
-    iov.iov_len = pkt_size;
-    mhdr.msg_name = (caddr_t)dest;
-    mhdr.msg_namelen = sizeof(struct sockaddr_in6);
-    mhdr.msg_flags = 0;
-    mhdr.msg_iov = &iov;
-    mhdr.msg_iovlen = 1;
-    mhdr.msg_control = (caddr_t)cmsgbuf;
-    if (hlim >= 0) {
-	mhdr.msg_controllen = BUF_SIZE;
-    }
-    else {
-	mhdr.msg_controllen = BUF_SIZE_NO_HLIM;
-    }
-
-    /* specify the outgoing interface */
-    bzero(cmsgbuf, sizeof(cmsgbuf));
-    cm = CMSG_FIRSTHDR(&mhdr);
-    if (cm == NULL) {
-	/* this can't happen, keep static analyzer happy */
-	return (EINVAL);
-    }
-    cm->cmsg_level = IPPROTO_IPV6;
-    cm->cmsg_type = IPV6_PKTINFO;
-    cm->cmsg_len = CMSG_LEN(sizeof(struct in6_pktinfo));
-    pi = (struct in6_pktinfo *)(void *)CMSG_DATA(cm);
-    pi->ipi6_ifindex = ifindex;
-
-    /* specify the hop limit of the packet */
-    if (hlim >= 0) {
-	cm = CMSG_NXTHDR(&mhdr, cm);
-	if (cm == NULL) {
-	    /* this can't happen, keep static analyzer happy */
-	    return (EINVAL);
-	}
-	cm->cmsg_level = IPPROTO_IPV6;
-	cm->cmsg_type = IPV6_HOPLIMIT;
-	cm->cmsg_len = CMSG_LEN(sizeof(int));
-	*((int *)(void *)CMSG_DATA(cm)) = hlim;
-    }
-    n = sendmsg(sockfd, &mhdr, 0);
-    if (n != pkt_size) {
-	ret = errno;
-    }
-    else {
-	ret = 0;
-    }
-    return (ret);
-}
 
 PRIVATE_EXTERN int
 ICMPv6SocketOpen(bool receive_too)
@@ -182,6 +121,16 @@ ICMPv6SocketOpen(bool receive_too)
 		      strerror(errno));
     }
 #endif /* SO_TRAFFIC_CLASS */
+
+#if defined(SO_DEFUNCTOK)
+    opt = 0;
+    /* ensure that our socket can't be defunct'd */
+    if (setsockopt(sockfd, SOL_SOCKET, SO_DEFUNCTOK, &opt,
+		   sizeof(opt)) < 0) {
+	IPConfigLogFL(LOG_ERR, "setsockopt(SO_DEFUNCTOK) failed, %s",
+		      strerror(errno));
+    }
+#endif /* SO_DEFUNCTOK */
 
     return (sockfd);
 

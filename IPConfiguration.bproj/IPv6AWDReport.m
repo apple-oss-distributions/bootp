@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Apple Inc. All rights reserved.
+ * Copyright (c) 2017-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -75,10 +75,15 @@ _IPv6AWDReportCreate(InterfaceType type)
     metric.dhcpv6DnsServers = NO;
     metric.linklocalAddressDuplicated = NO;
     metric.manualAddressConfigured = NO;
+    metric.prefixPreferredLifetimeSeconds = 0;
+    metric.prefixValidLifetimeSeconds = 0;
     metric.prefixLifetimeNotInfinite = NO;
     metric.routerLifetimeNotMaximum = NO;
+    metric.routerLifetimeSeconds = 0;
     metric.routerLifetimeZero = NO;
     metric.routerSourceAddressCollision = NO;
+    metric.xlat464Enabled = NO;
+    metric.xlat464PlatDiscoveryFailed = NO;
 
     /* default integers to 0 */
     metric.autoconfAddressAcquisitionSeconds = 0;
@@ -224,9 +229,27 @@ IPv6AWDReportSetManualAddressConfigured(IPv6AWDReportRef report)
 }
 
 void
+IPv6AWDReportSetPrefixPreferredLifetime(IPv6AWDReportRef report, uint32_t val)
+{
+    IPV6_REPORT_SET_PROP(report, prefixPreferredLifetimeSeconds, val);
+}
+
+void
+IPv6AWDReportSetPrefixValidLifetime(IPv6AWDReportRef report, uint32_t val)
+{
+    IPV6_REPORT_SET_PROP(report, prefixValidLifetimeSeconds, val);
+}
+
+void
 IPv6AWDReportSetPrefixLifetimeNotInfinite(IPv6AWDReportRef report)
 {
     IPV6_REPORT_SET_PROP(report, prefixLifetimeNotInfinite, YES);
+}
+
+void
+IPv6AWDReportSetRouterLifetime(IPv6AWDReportRef report, uint16_t val)
+{
+    IPV6_REPORT_SET_PROP(report, routerLifetimeSeconds, val);
 }
 
 void
@@ -245,6 +268,18 @@ void
 IPv6AWDReportSetRouterLifetimeZero(IPv6AWDReportRef report)
 {
     IPV6_REPORT_SET_PROP(report, routerLifetimeZero, YES);
+}
+
+void
+IPv6AWDReportSetXLAT464Enabled(IPv6AWDReportRef report)
+{
+    IPV6_REPORT_SET_PROP(report, xlat464Enabled, YES);
+}
+
+void
+IPv6AWDReportSetXLAT464PLATDiscoveryFailed(IPv6AWDReportRef report)
+{
+    IPV6_REPORT_SET_PROP(report, xlat464PlatDiscoveryFailed, YES);
 }
 
 void
@@ -333,10 +368,14 @@ main(int argc, char * argv[])
     IPv6AWDReportSetDHCPv6DNSServers(report);
     IPv6AWDReportSetDHCPv6DNSDomainList(report);
     IPv6AWDReportSetManualAddressConfigured(report);
+    IPv6AWDReportSetPrefixPreferredLifetime(report, 1800);
+    IPv6AWDReportSetPrefixValidLifetime(report, 3600);
     IPv6AWDReportSetPrefixLifetimeNotInfinite(report);
+    IPv6AWDReportSetRouterLifetime(report, 360);
     IPv6AWDReportSetRouterLifetimeNotMaximum(report);
     IPv6AWDReportSetRouterSourceAddressCollision(report);
     IPv6AWDReportSetRouterLifetimeZero(report);
+    IPv6AWDReportSetXLAT464Enabled(report);
 
     IPv6AWDReportSetDefaultRouterCount(report, 1);
     IPv6AWDReportSetExpiredDefaultRouterCount(report, 2);

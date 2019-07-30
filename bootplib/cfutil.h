@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -99,6 +99,10 @@ my_CFPropertyListWriteFile(CFPropertyListRef plist, const char * filename,
 Boolean
 my_CFStringArrayToCStringArray(CFArrayRef arr, void * buffer, int * buffer_size,
 			       int * ret_count);
+
+char * *
+my_CStringArrayCreate(CFArrayRef list, int * ret_count);
+
 Boolean
 my_CFStringArrayToEtherArray(CFArrayRef array, char * buffer, int * buffer_size,
 			     int * ret_count);
@@ -107,6 +111,9 @@ my_CFStringToIPAddress(CFStringRef str, struct in_addr * ret_ip);
 
 bool
 my_CFStringToIPv6Address(CFStringRef str, struct in6_addr * ret_ip);
+
+struct in6_addr *
+my_CFArrayToIPv6Addresses(CFArrayRef list, int * ret_ip_count);
 
 int
 my_CFStringToCStringAndLengthExt(CFStringRef cfstr, char * str, int len,
@@ -126,6 +133,11 @@ my_CFStringToNumber(CFStringRef str, uint32_t * ret_val);
 void
 my_CFDictionarySetTypeAsArrayValue(CFMutableDictionaryRef dict,
 				   CFStringRef prop, CFTypeRef val);
+
+void
+my_CFDictionarySetIPAddressAsString(CFMutableDictionaryRef dict,
+				    CFStringRef prop,
+				    struct in_addr ip_addr);
 void
 my_CFDictionarySetIPAddressAsArrayValue(CFMutableDictionaryRef dict,
 					CFStringRef prop,
@@ -147,6 +159,10 @@ my_CFStringAppendBytesAsHex(CFMutableStringRef str, const uint8_t * bytes,
 			    int length, char sep);
 char *
 my_CFStringToCString(CFStringRef cfstr, CFStringEncoding encoding);
+
+char *
+my_CFStringToCStringWithRange(CFStringRef cfstr,
+			      CFRange range, CFStringEncoding encoding);
 
 void
 my_CFStringPrint(FILE * f, CFStringRef str);

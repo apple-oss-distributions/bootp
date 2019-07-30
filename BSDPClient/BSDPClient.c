@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2016 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -73,6 +73,7 @@
 #include "dhcplib.h"
 #include "interfaces.h"
 #include "bootp_transmit.h"
+#include "symbol_scope.h"
 
 #define BSDPCLIENT_MAX_WAIT_SECS		16
 #define BSDPCLIENT_LIST_MAX_TRIES		7
@@ -112,9 +113,9 @@ struct {
     { bad_sysid4, sizeof(bad_sysid4) },
 };
 #endif /* TEST_BAD_SYSID */
-static const unsigned char	rfc_magic[4] = RFC_OPTIONS_MAGIC;
+STATIC const unsigned char	rfc_magic[4] = RFC_OPTIONS_MAGIC;
 
-static const u_char dhcp_params[] = {
+STATIC const u_char dhcp_params[] = {
     dhcptag_vendor_class_identifier_e,
     dhcptag_vendor_specific_e,
 };
@@ -184,7 +185,7 @@ struct BSDPClient_s {
  *	"<domain>:/Network/Service/<serviceID>[/<entity>]";
  *    and return the <serviceID> portion of the string.
  */
-static CFStringRef
+STATIC CFStringRef
 mySCNetworkServicePathCopyServiceID(CFStringRef path)
 {
     CFArrayRef		arr;
@@ -210,7 +211,7 @@ mySCNetworkServicePathCopyServiceID(CFStringRef path)
 
 }
 
-static Boolean
+STATIC Boolean
 get_dhcp_address(const char * ifname, struct in_addr * ret_ip)
 {
     CFStringRef		ifname_cf = NULL;
@@ -324,28 +325,18 @@ get_dhcp_address(const char * ifname, struct in_addr * ret_ip)
     return (ret);
 }
 
-static void
+STATIC void
 BSDPClientProcessList(BSDPClientRef client, struct in_addr server_ip,
 		      struct dhcp * reply, int reply_len,
 		      dhcpol_t * options_p, dhcpol_t * bsdp_options_p);
-static void
+STATIC void
 BSDPClientProcessSelect(BSDPClientRef client, bsdp_msgtype_t bsdp_msg);
 
-void
-my_log(int priority, const char *message, ...)
-{
-    va_list 		ap;
-
-    va_start(ap, message);
-    vfprintf(stderr, message, ap);
-    return;
-}
-
-static char * SystemIdentifierCopy(void);
+STATIC char * SystemIdentifierCopy(void);
 
 #if defined(__ppc__) || defined(__ppc64__)
 #define BSDP_ARCHITECTURE	"ppc"
-static NetBootVersion
+STATIC NetBootVersion
 NetBootVersionGet()
 {
     CFDictionaryRef		properties = NULL;
@@ -372,7 +363,7 @@ NetBootVersionGet()
     return (support);
 }
 
-static BSDPClientStatus
+STATIC BSDPClientStatus
 CopyNetBootVersionAndSystemIdentifier(NetBootVersion * version_p,
 				      char * * system_id_p)
 {
@@ -391,7 +382,7 @@ CopyNetBootVersionAndSystemIdentifier(NetBootVersion * version_p,
 #elif defined(__i386__) || defined(__x86_64__)
 #define BSDP_ARCHITECTURE	"i386"
 
-static BSDPClientStatus
+STATIC BSDPClientStatus
 CopyNetBootVersionAndSystemIdentifier(NetBootVersion * version_p,
 				      char * * system_id_p)
 {
@@ -405,7 +396,7 @@ CopyNetBootVersionAndSystemIdentifier(NetBootVersion * version_p,
 
 #else
 
-static BSDPClientStatus
+STATIC BSDPClientStatus
 CopyNetBootVersionAndSystemIdentifier(NetBootVersion * version_p,
 				      char * * system_id_p)
 {
@@ -414,7 +405,7 @@ CopyNetBootVersionAndSystemIdentifier(NetBootVersion * version_p,
 
 #endif
 
-static char *
+STATIC char *
 SystemIdentifierCopy()
 {
     CFDictionaryRef		properties = NULL;
@@ -449,7 +440,7 @@ SystemIdentifierCopy()
 
 #define RX_BUF_SIZE		(8 * 1024)
 
-static struct dhcp * 
+STATIC struct dhcp * 
 make_bsdp_request(char * system_id, struct dhcp * request, int pkt_size,
 		  dhcp_msgtype_t msg, u_char * hwaddr, u_char hwtype, 
 		  u_char hwlen, dhcpoa_t * options_p)
@@ -506,7 +497,7 @@ make_bsdp_request(char * system_id, struct dhcp * request, int pkt_size,
     }
 #else /* TEST_BAD_SYSID */
     { 
-	static int	bad_sysid_index;
+	STATIC int	bad_sysid_index;
 
 	if (dhcpoa_add(options_p,
 		       dhcptag_vendor_class_identifier_e, 
@@ -529,7 +520,7 @@ make_bsdp_request(char * system_id, struct dhcp * request, int pkt_size,
     return (NULL);
 }
 
-static int
+STATIC int
 S_open_socket(u_short * ret_port)
 {
     u_short			client_port;
@@ -655,7 +646,7 @@ BSDPImageDescriptionIdentifierImageKind(CFNumberRef identifier)
  ** BSDPClient timer functions
  **/
 
-static void
+STATIC void
 BSDPClientProcessTimer(CFRunLoopTimerRef timer, void * info)
 {
     BSDPClientRef	client;
@@ -665,7 +656,7 @@ BSDPClientProcessTimer(CFRunLoopTimerRef timer, void * info)
     return;
 }
 
-static void
+STATIC void
 BSDPClientCancelTimer(BSDPClientRef client)
 {
     if (client->timer) {
@@ -676,7 +667,7 @@ BSDPClientCancelTimer(BSDPClientRef client)
     return;
 }
 
-static void
+STATIC void
 BSDPClientSetTimer(BSDPClientRef client, struct timeval rel_time,
 		   BSDPClientTimerCallBack callback)
 {
@@ -708,7 +699,7 @@ BSDPClientSetTimer(BSDPClientRef client, struct timeval rel_time,
  *   Dispatch to the appropriate handler (list or select) 
  *   depending on our current running state.
  */
-static void
+STATIC void
 BSDPClientProcess(CFSocketRef s, CFSocketCallBackType type, 
 		  CFDataRef address, const void *data, void *info)
 {
@@ -717,7 +708,7 @@ BSDPClientProcess(CFSocketRef s, CFSocketCallBackType type,
     BSDPClientRef 		client = (BSDPClientRef)info;
     dhcpo_err_str_t		err;
     struct sockaddr_in 		from;
-    socklen_t 			fromlen;
+    socklen_t 			fromlen	= sizeof(from);
     int 			n;
     void *			opt;
     int				opt_len;
@@ -1045,7 +1036,7 @@ BSDPClientFree(BSDPClientRef * client_p)
 /**
  ** BSDP List Routines
  **/
-static boolean_t
+STATIC boolean_t
 attributes_match(u_int16_t attrs,
 		 const u_int16_t * attrs_list, int n_attrs_list)
 {
@@ -1062,7 +1053,7 @@ attributes_match(u_int16_t attrs,
     return (FALSE);
 }
 
-static CFArrayRef
+STATIC CFArrayRef
 BSDPClientCreateImageList(BSDPClientRef client,
 			  bsdp_image_id_t default_image_id,
 			  bsdp_image_id_t selected_image_id,
@@ -1154,7 +1145,7 @@ BSDPClientCreateImageList(BSDPClientRef client,
     return (NULL);
 }
 
-static void
+STATIC void
 BSDPClientProcessList(BSDPClientRef client, struct in_addr server_ip,
 		      struct dhcp * reply, int reply_len,
 		      dhcpol_t * options_p, dhcpol_t * bsdp_options_p)
@@ -1221,7 +1212,7 @@ BSDPClientProcessList(BSDPClientRef client, struct in_addr server_ip,
     return;
 }
 
-static BSDPClientStatus
+STATIC BSDPClientStatus
 BSDPClientSendListRequest(BSDPClientRef client)
 {
     char		bsdp_buf[DHCP_OPTION_SIZE_MAX];
@@ -1335,7 +1326,7 @@ BSDPClientSendListRequest(BSDPClientRef client)
     return (status);
 }
 
-static void
+STATIC void
 BSDPClientListTimeout(BSDPClientRef client)
 {
     BSDPClientStatus	status = kBSDPClientStatusOK;
@@ -1404,7 +1395,7 @@ BSDPClientList(BSDPClientRef client, BSDPClientListCallBack callback,
  ** BSDP Select Routines
  **/
 
-static void
+STATIC void
 BSDPClientProcessSelect(BSDPClientRef client, bsdp_msgtype_t bsdp_msg)
 {
     BSDPClientStatus	status;
@@ -1420,7 +1411,7 @@ BSDPClientProcessSelect(BSDPClientRef client, bsdp_msgtype_t bsdp_msg)
     return;
 }
 
-static BSDPClientStatus
+STATIC BSDPClientStatus
 BSDPClientSendSelectRequest(BSDPClientRef client)
 {
     char		bsdp_buf[DHCP_OPTION_SIZE_MAX];
@@ -1533,7 +1524,7 @@ BSDPClientSendSelectRequest(BSDPClientRef client)
     return (status);
 }
 
-static void
+STATIC void
 BSDPClientSelectTimeout(BSDPClientRef client)
 {
     BSDPClientStatus	status = kBSDPClientStatusOK;
@@ -1608,7 +1599,7 @@ BSPPClientSelect(BSDPClientRef client,
 }
 
 #ifdef TEST_BAD_SYSID
-static void bad_sysid_callback(BSDPClientRef client, 
+STATIC void bad_sysid_callback(BSDPClientRef client, 
 			       BSDPClientStatus status,
 			       CFStringRef ServerAddress,
 			       CFNumberRef ServerPriority,

@@ -26,6 +26,9 @@
     uint32_t _expiredPrefixCount;
     AWDIPConfigurationInterfaceType _interfaceType;
     uint32_t _prefixCount;
+    uint32_t _prefixPreferredLifetimeSeconds;
+    uint32_t _prefixValidLifetimeSeconds;
+    uint32_t _routerLifetimeSeconds;
     uint32_t _routerSolicitationCount;
     BOOL _autoconfAddressAcquired;
     BOOL _autoconfAddressDeprecated;
@@ -43,6 +46,8 @@
     BOOL _routerLifetimeNotMaximum;
     BOOL _routerLifetimeZero;
     BOOL _routerSourceAddressCollision;
+    BOOL _xlat464Enabled;
+    BOOL _xlat464PlatDiscoveryFailed;
     struct {
         int timestamp:1;
         int autoconfAddressAcquisitionSeconds:1;
@@ -54,6 +59,9 @@
         int expiredPrefixCount:1;
         int interfaceType:1;
         int prefixCount:1;
+        int prefixPreferredLifetimeSeconds:1;
+        int prefixValidLifetimeSeconds:1;
+        int routerLifetimeSeconds:1;
         int routerSolicitationCount:1;
         int autoconfAddressAcquired:1;
         int autoconfAddressDeprecated:1;
@@ -71,6 +79,8 @@
         int routerLifetimeNotMaximum:1;
         int routerLifetimeZero:1;
         int routerSourceAddressCollision:1;
+        int xlat464Enabled:1;
+        int xlat464PlatDiscoveryFailed:1;
     } _has;
 }
 
@@ -160,6 +170,21 @@
 
 @property (nonatomic) BOOL hasDnsConfigurationAcquisitionSeconds;
 @property (nonatomic) uint32_t dnsConfigurationAcquisitionSeconds;
+
+@property (nonatomic) BOOL hasPrefixPreferredLifetimeSeconds;
+@property (nonatomic) uint32_t prefixPreferredLifetimeSeconds;
+
+@property (nonatomic) BOOL hasPrefixValidLifetimeSeconds;
+@property (nonatomic) uint32_t prefixValidLifetimeSeconds;
+
+@property (nonatomic) BOOL hasRouterLifetimeSeconds;
+@property (nonatomic) uint32_t routerLifetimeSeconds;
+
+@property (nonatomic) BOOL hasXlat464Enabled;
+@property (nonatomic) BOOL xlat464Enabled;
+
+@property (nonatomic) BOOL hasXlat464PlatDiscoveryFailed;
+@property (nonatomic) BOOL xlat464PlatDiscoveryFailed;
 
 // Performs a shallow copy into other
 - (void)copyTo:(AWDIPConfigurationIPv6Report *)other;

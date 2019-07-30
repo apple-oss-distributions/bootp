@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Apple Inc. All rights reserved.
+ * Copyright (c) 2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,36 +22,23 @@
  */
 
 /*
- * IPv6Socket.h
- * - common functions for creating/sending packets over IPv6 sockets
+ * IPConfigurationUtil.h
+ * - API to communicate with IPConfiguration agent to perform various tasks
  */
 
 /* 
  * Modification History
  *
- * May 24, 2013		Dieter Siegmund (dieter@apple.com)
- * - created
+ * March 29, 2018 	Dieter Siegmund (dieter@apple.com)
+ * - initial revision
  */
 
-#ifndef _S_IPV6SOCKET_H
-#define _S_IPV6SOCKET_H
+#ifndef _IPCONFIGURATIONUTIL_H
+#define _IPCONFIGURATIONUTIL_H
 
-#include <stdbool.h>
-#include <netinet/in.h>
-#include <netinet/ip6.h>
+#include <CoreFoundation/CFString.h>
 
-int
-IPv6SocketSend(int sockfd, int ifindex, const struct sockaddr_in6 * dest,
-	       const void * pkt, int pkt_size, int hlim);
+Boolean
+IPConfigurationForgetNetwork(CFStringRef ifname, CFStringRef ssid);
 
-int
-ICMPv6SocketOpen(bool receive_too);
-
-int
-ICMPv6SocketSendNeighborAdvertisement(int sockfd,
-				      int if_index,
-				      const void * link_addr,
-				      int link_addr_length,
-				      const struct in6_addr * target_ipaddr);
-
-#endif /* _S_IPV6SOCKET_H */
+#endif /* _IPCONFIGURATIONUTIL_H */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2016 Apple Inc. All rights reserved.
+ * Copyright (c) 2000-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -138,7 +138,7 @@ S_open_bootp_socket(uint16_t client_port)
     status = setsockopt(sockfd, SOL_SOCKET, SO_RECV_ANYIF, (caddr_t)&opt,
 			sizeof(opt));
     if (status < 0) {
-	my_log(LOG_INFO, "setsockopt(SO_RECV_ANYIF) failed, %s",
+	my_log(LOG_ERR, "setsockopt(SO_RECV_ANYIF) failed, %s",
 	       strerror(errno));
     }
 #endif /* SO_RECV_ANYIF */
@@ -149,11 +149,21 @@ S_open_bootp_socket(uint16_t client_port)
     status = setsockopt(sockfd, SOL_SOCKET, SO_TRAFFIC_CLASS, &opt,
 			sizeof(opt));
     if (status < 0) {
-	my_log(LOG_INFO, "setsockopt(SO_TRAFFIC_CLASS) failed, %s",
+	my_log(LOG_ERR, "setsockopt(SO_TRAFFIC_CLASS) failed, %s",
 	       strerror(errno));
     }
 #endif /* SO_TRAFFIC_CLASS */
 
+#if defined(SO_DEFUNCTOK)
+    opt = 0;
+    /* ensure that our socket can't be defunct'd */
+    status = setsockopt(sockfd, SOL_SOCKET, SO_DEFUNCTOK, &opt,
+			sizeof(opt));
+    if (status < 0) {
+	my_log(LOG_ERR, "setsockopt(SO_DEFUNCTOK) failed, %s",
+	       strerror(errno));
+    }
+#endif /* SO_DEFUNCTOK */
     return sockfd;
 
  failed:
@@ -230,13 +240,35 @@ bootp_session_delayed_close(void * arg1, void * arg2, void * arg3)
 	       "bootp_session_delayed_close(): called when socket in use");
 	return;
     }
-    my_log(LOG_INFO, 
+    my_log(LOG_DEBUG,
 	   "bootp_session_delayed_close(): closing bootp socket %d",
 	   FDCalloutGetFD(session->read_fd));
 
     /* this closes the file descriptor */
     FDCalloutRelease(&session->read_fd);
     return;
+}
+
+static boolean_t
+bootp_session_open_socket(bootp_session_t * session)
+{
+    int	sockfd;
+
+    sockfd =  S_open_bootp_socket(session->client_port);
+    if (sockfd < 0) {
+	my_log(LOG_ERR,
+	       "bootp_session_open_socket: S_open_bootp_socket() failed, %s",
+	       strerror(errno));
+	return (FALSE);
+    }
+    my_log(LOG_DEBUG,
+	   "bootp_session_open_socket(): opened bootp socket %d",
+	   sockfd);
+    /* register as a reader */
+    session->read_fd = FDCalloutCreate(sockfd,
+				       bootp_session_read,
+				       session, NULL);
+    return (TRUE);
 }
 
 static void
@@ -253,13 +285,13 @@ bootp_client_close_socket(bootp_client_t * client)
 	return;
     }
     session->read_fd_refcount--;
-    my_log(LOG_INFO, "bootp_client_close_socket(%s): refcount %d",
+    my_log(LOG_DEBUG, "bootp_client_close_socket(%s): refcount %d",
 	   if_name(client->if_p), session->read_fd_refcount);
     client->fd_open = FALSE;
     if (session->read_fd_refcount == 0) {
 	struct timeval tv;
 
-	my_log(LOG_INFO, 
+	my_log(LOG_DEBUG,
 	       "bootp_client_close_socket(): scheduling delayed close");
 
 	tv.tv_sec = 1; /* close it after 1 second of non-use */
@@ -281,7 +313,7 @@ bootp_client_open_socket(bootp_client_t * client)
     }
     timer_cancel(session->timer_callout);
     session->read_fd_refcount++;
-    my_log(LOG_INFO, "bootp_client_open_socket (%s): refcount %d", 
+    my_log(LOG_DEBUG, "bootp_client_open_socket (%s): refcount %d",
 	   if_name(client->if_p), session->read_fd_refcount);
     client->fd_open = TRUE;
     if (session->read_fd_refcount > 1) {
@@ -289,25 +321,11 @@ bootp_client_open_socket(bootp_client_t * client)
 	return (TRUE);
     }
     if (session->read_fd != NULL) {
-	my_log(LOG_INFO, "bootp_client_open_socket(): socket is still open");
+	my_log(LOG_DEBUG, "bootp_client_open_socket(): socket is still open");
     }
-    else {
-	int	sockfd;
-
-	sockfd =  S_open_bootp_socket(session->client_port);
-	if (sockfd < 0) {
-	    my_log(LOG_ERR, 
-		   "bootp_client_open_socket: S_get_bootp_socket() failed, %s",
-		   strerror(errno));
-	    goto failed;
-	}
-	my_log(LOG_INFO, 
-	       "bootp_client_open_socket(): opened bootp socket %d",
-	       sockfd);
-	/* register as a reader */
-	session->read_fd = FDCalloutCreate(sockfd,
-					   bootp_session_read,
-					   session, NULL);
+    else if (!bootp_session_open_socket(session)) {
+	my_log(LOG_NOTICE, "bootp_session_open_socket failed");
+	goto failed;
     }
     return (TRUE);
 
@@ -586,9 +604,16 @@ bootp_session_read(void * arg1, void * arg2)
 	}
     }
     else if (n < 0) {
-	if (errno != EAGAIN) {
-	    my_log(LOG_ERR, "bootp_session_read(): recvmsg failed, %s", 
-		   strerror(errno));
+	int	error = errno;
+
+	if (error != EAGAIN) {
+	    my_log(LOG_ERR, "bootp_session_read(%d): recvmsg failed, %s",
+		   FDCalloutGetFD(session->read_fd), strerror(error));
+	    if (error == ENOTCONN) {
+		/* close and re-open */
+		FDCalloutRelease(&session->read_fd);
+		bootp_session_open_socket(session);
+	    }
 	}
     }
     return;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2016 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2018 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -242,11 +242,11 @@ static const uint8_t dhcp_static_default_params[] = {
     dhcptag_domain_name_e,
     dhcptag_domain_search_e,
     dhcptag_proxy_auto_discovery_url_e,
-#if ! TARGET_OS_EMBEDDED
+#if TARGET_OS_OSX
     dhcptag_ldap_url_e,
     dhcptag_nb_over_tcpip_name_server_e,
     dhcptag_nb_over_tcpip_node_type_e,
-#endif /* ! TARGET_OS_EMBEDDED */
+#endif /* TARGET_OS_OSX */
 };
 #define	N_DHCP_STATIC_DEFAULT_PARAMS 	(sizeof(dhcp_static_default_params) / sizeof(dhcp_static_default_params[0]))
 
@@ -1505,8 +1505,8 @@ switch_to_lease(ServiceRef service_p, DHCPLeaseRef lease_p)
     return (TRUE);
 }
 
-static boolean_t
-recover_lease(ServiceRef service_p, struct in_addr * our_ip)
+static void
+recover_lease(ServiceRef service_p)
 {
     const void *	cid;
     uint8_t		cid_type;
@@ -1523,17 +1523,13 @@ recover_lease(ServiceRef service_p, struct in_addr * our_ip)
 		      cid_type, cid, cid_length);
     count = DHCPLeaseListCount(&dhcp->lease_list);
     if (count == 0) {
-	goto failed;
+	return;
     }
     lease_p = DHCPLeaseListElement(&dhcp->lease_list, count - 1);
     (void)switch_to_lease(service_p, lease_p);
-    *our_ip = lease_p->our_ip;
     my_log(LOG_INFO, "DHCP %s: recovered lease for IP " IP_FORMAT,
-	   if_name(if_p), IP_LIST(our_ip));
-    return (TRUE);
-
- failed:
-    return (FALSE);
+	   if_name(if_p), IP_LIST(&lease_p->our_ip));
+    return;
 }
 
 static boolean_t
@@ -1855,12 +1851,12 @@ dhcp_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	  dhcp->xid = arc4random();
 	  DHCPLeaseListInit(&dhcp->lease_list);
 	  our_ip.s_addr = 0;
-	  if (ServiceIsNetBoot(service_p)
-	      || recover_lease(service_p, &our_ip)) {
+	  if (ServiceIsNetBoot(service_p)) {
 	      dhcp_init_reboot(service_p, IFEventID_start_e, &our_ip);
 	  }
 	  else {
-	      dhcp_init(service_p, IFEventID_start_e, NULL);
+	      recover_lease(service_p);
+	      dhcp_check_link(service_p, IFEventID_start_e);
 	  }
 	  break;
       }
@@ -1960,11 +1956,6 @@ dhcp_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 		 IP_LIST(&dhcp->saved.our_ip),
 		 EA_LIST(arpc->hwaddr),
 		 IP_LIST(&dhcp->saved.server_ip));
-	  if (dhcp->state != dhcp_cstate_init_reboot_e) {
-	      /* don't bother reporting it */
-	      ServiceReportIPv4AddressConflict(service_p,
-					       dhcp->saved.our_ip);
-	  }
 	  _dhcp_lease_clear(service_p, FALSE);
 	  service_publish_failure(service_p, 
 				  ipconfig_status_address_in_use_e);
@@ -2130,6 +2121,32 @@ dhcp_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	  dhcp_handle_active_during_sleep(service_p, 
 					  (active_during_sleep_t *)event_data);
 	  break;
+      case IFEventID_forget_ssid_e: {
+	  CFStringRef	ssid = (CFStringRef)event_data;
+
+	  my_log(LOG_NOTICE, "DHCP %s: ForgetSSID %@", if_name(if_p), ssid);
+	  DHCPLeaseListRemoveLeaseWithSSID(&dhcp->lease_list, ssid);
+	  if (dhcp->lease.ssid != NULL && CFEqual(dhcp->lease.ssid, ssid)) {
+	      struct timeval	tv;
+
+	      /* if the lease is current, give it up, and try again */
+	      (void)dhcp_release(service_p);
+	      service_remove_address(service_p);
+	      service_publish_failure(service_p,
+				      ipconfig_status_lease_terminated_e);
+	      dhcpol_free(&dhcp->saved.options);
+	      dhcp_lease_set_ssid(dhcp, NULL);
+
+	      /* try again in 0.5 seconds */
+	      tv.tv_sec = 0;
+	      tv.tv_usec = USECS_PER_SEC / 2;
+	      timer_set_relative(dhcp->timer, tv,
+				 (timer_func_t *)dhcp_check_link,
+				 service_p, (void *)event_id,
+				 NULL);
+	  }
+	  break;
+      }
       default:
 	  break;
     } /* switch (event_id) */
