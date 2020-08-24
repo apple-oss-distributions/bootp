@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2018 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2020 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -611,7 +611,7 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
     char		scratch_hwstr[sizeof(rq->dp_chaddr) * 3];
     SubnetRef 		subnet = NULL;
     dhcp_lease_time_t *	suggested_lease = NULL;
-    dhcp_cstate_t	state = dhcp_cstate_none_e;
+    dhcp_cstate_t	state = dhcp_cstate_inactive_e;
     uint32_t		txbuf[ETHERMTU / sizeof(uint32_t)];
     boolean_t		use_broadcast = FALSE;
 
@@ -861,6 +861,7 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
 	  break;
       }
       case dhcp_msgtype_request_e: {
+	  struct in_addr	lookup_address = { 0 };
 	  const char * 		nak = NULL;
 	  int			optlen;
 	  struct in_addr	our_ip;
@@ -874,9 +875,10 @@ dhcp_request(request_t * request, dhcp_msgtype_t msgtype,
 	      dhcpol_find(request->options_p, dhcptag_requested_ip_address_e,
 			  &optlen, NULL);
 	  if (req_ip != NULL) {
-	      iaddr = *req_ip;
+	      /* find a local address that best matches the request */
+	      lookup_address = *req_ip;
 	  }
-	  our_ip = if_inet_addr_best_match(request->if_p, iaddr);
+	  our_ip = if_inet_addr_best_match(request->if_p, lookup_address);
 	  if (server_id) { /* SELECT */
 	      struct hosts *	hp = hostbyaddr(S_pending_hosts, cid_type,
 						cid, cid_len,
