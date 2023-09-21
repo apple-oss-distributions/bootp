@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2023 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -701,7 +701,6 @@ rtadv_acquired(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 		my_log(LOG_INFO, "RTADV %s: ignoring RA (not from %@)",
 		       if_name(if_p),
 		       RouterAdvertisementGetSourceIPAddressAsString(rtadv->ra));
-		CFRelease(ra);
 		break;
 	    }
 	}
@@ -709,7 +708,6 @@ rtadv_acquired(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	    rtadv->router_lifetime_zero = TRUE;
 	    my_log(LOG_INFO,
 		   "RTADV %s: ignoring RA (lifetime zero)", if_name(if_p));
-	    CFRelease(ra);
 	    break;
 	}
 
@@ -723,10 +721,10 @@ rtadv_acquired(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	    my_log(LOG_NOTICE,
 		   "RTADV %s: router lifetime became zero",
 		   if_name(if_p));
-	    my_CFRelease(&ra);
 	}
 	else {
 	    /* save the new RA */
+	    CFRetain(ra);
 	    rtadv->ra = ra;
 	}
 
@@ -742,19 +740,22 @@ rtadv_acquired(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 		DHCPv6ClientMode	mode;
 
 		expected_mode = (flags & ND_RA_FLAG_MANAGED) != 0
-		    ? kDHCPv6ClientModeStateful : kDHCPv6ClientModeStateless;
+		    ? kDHCPv6ClientModeStatefulAddress
+		    : kDHCPv6ClientModeStateless;
 		mode = DHCPv6ClientGetMode(rtadv->dhcp_client);
 		if (mode != expected_mode) {
-		    bool stateful;
+		    bool	privacy_required;
 
-		    stateful = (expected_mode == kDHCPv6ClientModeStateful);
-		    DHCPv6ClientStart(rtadv->dhcp_client,
-				      (G_dhcpv6_stateful_enabled && stateful),
-				      ServiceIsPrivacyRequired(service_p));
+		    privacy_required = ServiceIsPrivacyRequired(service_p);
+		    DHCPv6ClientStop(rtadv->dhcp_client);
+		    DHCPv6ClientSetUsePrivateAddress(rtadv->dhcp_client,
+						     privacy_required);
+		    DHCPv6ClientSetMode(rtadv->dhcp_client, expected_mode);
+		    DHCPv6ClientStart(rtadv->dhcp_client);
 		}
 	    }
 	    else if (DHCPv6ClientIsActive(rtadv->dhcp_client)) {
-		DHCPv6ClientStop(rtadv->dhcp_client, FALSE);
+		DHCPv6ClientStop(rtadv->dhcp_client);
 	    }
 	}
 	if (rtadv->ra != NULL) {
@@ -832,6 +833,7 @@ rtadv_solicit(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	rtadv->dhcpv6_complete = 0;
 	rtadv->success_report_submitted = FALSE;
 	rtadv->router_lifetime_zero = FALSE;
+	ServiceUnpublishCLAT46(service_p);
 	rtadv_remove_clat46_address(service_p);
 	rtadv_cancel_pending_events(service_p);
 	RTADVSocketEnableReceive(rtadv->sock,
@@ -914,9 +916,15 @@ rtadv_solicit(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 			   service_p, (void *)IFEventID_timeout_e, NULL);
 	break;
 
-    case IFEventID_data_e:
-	rtadv_acquired(service_p, IFEventID_start_e, event_data);
+    case IFEventID_data_e: {
+	RouterAdvertisementRef ra;
+
+	ra = (RouterAdvertisementRef)event_data;
+	if (RouterAdvertisementGetRouterLifetime(ra) != 0) {
+		rtadv_acquired(service_p, IFEventID_start_e, event_data);
+	}
 	break;
+    }
     default:
 	break;
     }
@@ -934,7 +942,8 @@ rtadv_flush(ServiceRef service_p)
     inet6_flush_routes(if_name(if_p));
     inet6_rtadv_disable(if_name(if_p));
     if (rtadv->dhcp_client != NULL) {
-	DHCPv6ClientStop(rtadv->dhcp_client, TRUE);
+	DHCPv6ClientStop(rtadv->dhcp_client);
+	DHCPv6ClientDiscardInformation(rtadv->dhcp_client);
     }
     rtadv_failed(service_p, ipconfig_status_network_changed_e);
     return;
@@ -1362,6 +1371,29 @@ rtadv_provide_summary(ServiceRef service_p, CFMutableDictionaryRef summary)
     return;
 }
 
+
+STATIC void
+rtadv_start(ServiceRef service_p, __unused void * arg2, __unused void * arg3)
+{
+    interface_t *	if_p = service_interface(service_p);
+
+    my_log(LOG_NOTICE, "RTADV %s: start", if_name(if_p));
+    rtadv_init(service_p);
+}
+
+STATIC void
+rtadv_schedule_start(ServiceRef service_p)
+{
+    Service_rtadv_t *	rtadv = (Service_rtadv_t *)ServiceGetPrivate(service_p);
+    struct timeval	tv;
+
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    timer_set_relative(rtadv->timer, tv,
+		       (timer_func_t *)rtadv_start,
+		       service_p, NULL, NULL);
+}
+
 PRIVATE_EXTERN ipconfig_status_t
 rtadv_thread(ServiceRef service_p, IFEventID_t evid, void * event_data)
 {
@@ -1419,7 +1451,7 @@ rtadv_thread(ServiceRef service_p, IFEventID_t evid, void * event_data)
 	}
 	/* clear out prefix (in case of crash) */
 	rtadv_set_nat64_prefixlist(service_p, NULL);
-	rtadv_init(service_p);
+	rtadv_schedule_start(service_p);
 	break;
 
     stop:
@@ -1503,7 +1535,7 @@ rtadv_thread(ServiceRef service_p, IFEventID_t evid, void * event_data)
     case IFEventID_link_timer_expired_e:
 	rtadv_inactive(service_p);
 	if (rtadv->dhcp_client != NULL) {
-	    DHCPv6ClientStop(rtadv->dhcp_client, FALSE);
+	    DHCPv6ClientStop(rtadv->dhcp_client);
 	}
 	break;
 

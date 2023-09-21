@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2023 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -409,10 +409,6 @@ typedef void (^ServiceInitHandler)(ServiceRef service);
 #define kSCEntNetNAT64			CFSTR("NAT64")
 #endif /* kSCEntNetNAT64 */
 
-#ifndef kSCEntNetDHCPv6
-#define kSCEntNetDHCPv6			CFSTR("DHCPv6")
-#endif /* kSCEntNetDHCPv6 */
-
 #ifndef kSCValNetIPv4ConfigMethodFailover
 static const CFStringRef kIPConfigurationConfigMethodFailover = CFSTR("Failover");
 #define kSCValNetIPv4ConfigMethodFailover kIPConfigurationConfigMethodFailover
@@ -653,6 +649,7 @@ static boolean_t		S_awake = TRUE;
 #if TARGET_OS_OSX
 static boolean_t		S_use_maintenance_wake = TRUE;
 static boolean_t		S_wake_event_sent;
+static boolean_t		S_hide_bssid;
 #endif /* TARGET_OS_OSX */
 static uint32_t			S_wake_generation;
 static absolute_time_t		S_wake_time;
@@ -888,6 +885,9 @@ ipconfig_method_string(ipconfig_method_t m)
 	break;
     case ipconfig_method_linklocal_v6_e:
 	str = "LINKLOCAL-V6";
+	break;
+    case ipconfig_method_dhcpv6_pd_e:
+	str = "DHCPV6-PD";
 	break;
     }
     return (str);
@@ -1207,6 +1207,33 @@ S_copy_neighbor_advert_list(SCDynamicStoreRef store, CFStringRef ifname)
     return (ret);
 }
 
+STATIC CFStringRef
+bssid_to_string(char * buffer, int buffer_size, WiFiInfoRef info_p)
+{
+    const struct ether_addr *	bssid = WiFiInfoGetBSSID(info_p);
+    CFStringRef			prop = CFSTR("BSSID");
+
+#if TARGET_OS_OSX
+    if (S_hide_bssid) {
+	bssid = WiFiInfoGetPrivateBSSID(info_p);
+	prop = CFSTR("Hashed-BSSID");
+    }
+#endif /* TARGET_OS_OSX */
+    link_addr_to_string(buffer, buffer_size,
+			(const uint8_t *)bssid, ETHER_ADDR_LEN);
+    return (prop);
+}
+
+STATIC void
+dict_add_bssid_info(CFMutableDictionaryRef dict, WiFiInfoRef info_p)
+{
+    char		bssid[LINK_ADDR_ETHER_STR_LEN];
+    CFStringRef		prop;
+
+    prop = bssid_to_string(bssid, sizeof(bssid), info_p);
+    my_CFDictionarySetCString(dict, prop, bssid);
+}
+
 /**
  ** Computer Name handling routines
  **/
@@ -1419,7 +1446,7 @@ service_populate_router_arpinfo(ServiceRef service_p,
 
     service_router_clear_arp_verified(service_p);
     
-    if (service_router_is_iaddr_valid(service_p) == 0) {
+    if (!service_router_is_iaddr_valid(service_p)) {
 	my_log(LOG_INFO,
 	       "%s: service_populate_router_arpinfo gateway missing", 
 	       if_name(if_p));
@@ -2253,7 +2280,7 @@ IFState_update_media_status(IFStateRef ifstate)
     else {
 	my_log(LOG_INFO, "%s link is %s", ifname, link.active ? "up" : "down");
     }
-    if (if_is_wireless(ifstate->if_p)) {
+    if (if_is_wifi_infra(ifstate->if_p)) {
 	WiFiInfoRef		info_p;
 
 	info_p = S_copy_wifi_info(ifstate->ifname);
@@ -2628,18 +2655,14 @@ IFStateCopySummary(IFStateRef ifstate)
 
             CFDictionarySetValue(if_summary, CFSTR("LinkStatusActive"),
                                  kCFBooleanTrue);
-            if (if_is_wireless(if_p) && info_p != NULL) {
+            if (if_is_wifi_infra(if_p) && info_p != NULL) {
 		const char *	auth_type;
-		char		bssid[LINK_ADDR_ETHER_STR_LEN];
 		CFStringRef	networkID;
 
 		auth_type = WiFiAuthTypeGetString(WiFiInfoGetAuthType(info_p));
 		my_CFDictionarySetCString(if_summary, CFSTR("Security"),
 					  auth_type);
-		link_addr_to_string(bssid, sizeof(bssid),
-				    (const uint8_t *)WiFiInfoGetBSSID(info_p),
-				    ETHER_ADDR_LEN);
-		my_CFDictionarySetCString(if_summary, CFSTR("BSSID"), bssid);
+		dict_add_bssid_info(if_summary, info_p);
 		CFDictionarySetValue(if_summary, CFSTR("SSID"),
 				     WiFiInfoGetSSID(info_p));
 		networkID = WiFiInfoGetNetworkID(info_p);
@@ -2670,18 +2693,28 @@ IFStateCopySummary(IFStateRef ifstate)
     return (if_summary);
 }
 
+STATIC const char *
+get_busy_string(boolean_t busy)
+{
+    return busy ? "busy" : "not busy";
+}
 
 STATIC void
 IFStateProcessBusy(IFStateRef ifstate)
 {
+    boolean_t	current_busy;
     boolean_t	busy;
 
     busy = service_list_check_busy(&ifstate->services)
 	|| service_list_check_busy(&ifstate->services_v6);
-    if (busy != IFStateFlagsAreSet(ifstate, kIFStateFlagsBusy)) {
+    current_busy = IFStateFlagsAreSet(ifstate, kIFStateFlagsBusy);
+    my_log(LOG_DEBUG, "%s: %s current %s requested %s",
+	   __func__, if_name(ifstate->if_p),
+	   get_busy_string(current_busy), get_busy_string(busy));
+    if (busy != current_busy) {
 	IFStateFlagsSetOrClear(ifstate, kIFStateFlagsBusy, busy);
-	my_log(LOG_INFO, "%s: %sbusy", if_name(ifstate->if_p),
-	       busy ? "" : "not ");
+	my_log(LOG_INFO, "%s: %s", if_name(ifstate->if_p),
+	       get_busy_string(busy));
 	IFStateReportState(ifstate,
 			   kSCEntNetInterfaceIPConfigurationBusy,
 			   IFStateFlagsAreSet(ifstate, kIFStateFlagsBusy));
@@ -3140,7 +3173,7 @@ ServiceIPv4CopyMergedDNSAndCaptive(ServiceRef service_p,
 					     service_p->serviceID, 
 					     IS_IPV6);
     bzero(&info_v6, sizeof(info_v6));
-    if (ipv6_service_p != NULL) {
+    if (ipv6_service_p != NULL && ServiceIsPublished(ipv6_service_p)) {
 	(void)config_method_event(ipv6_service_p, IFEventID_get_ipv6_info_e,
 				  &info_v6);
     }
@@ -3268,10 +3301,10 @@ ServiceSetBusy(ServiceRef service_p, boolean_t busy)
 {
     if (service_p->busy != busy) {
 	service_p->busy = busy;
-	my_log(LOG_INFO, "%s %s: %sbusy",
+	my_log(LOG_INFO, "%s %s: %s",
 	       ServiceGetMethodString(service_p),
 	       if_name(service_interface(service_p)),
-	       busy ? "" : "not ");
+	       get_busy_string(busy));
 	IFStateProcessBusy(service_ifstate(service_p));
     }
 }
@@ -3381,7 +3414,21 @@ ServicePublishSuccessIPv4(ServiceRef service_p, dhcp_info_t * dhcp_info_p)
 	CFRelease(primary);
     }
 
-    if (options != NULL) {
+    if (options == NULL) {
+	/* manual config, check for router */
+	if (service_router_is_iaddr_valid(service_p)) {
+	    struct in_addr	router;
+
+	    router = service_router_iaddr(service_p);
+	    if (router.s_addr != INADDR_ANY
+		&& router.s_addr != INADDR_BROADCAST) {
+		my_CFDictionarySetIPAddressAsString(ipv4_dict,
+						    kSCPropNetIPv4Router,
+						    router);
+	    }
+	}
+    }
+    else {
 	char *			host_name = NULL;
 	int			host_name_len = 0;
 	struct in_addr *	router = NULL;
@@ -3725,7 +3772,7 @@ ServiceIPv6CopyMergedDNSAndCaptive(ServiceRef service_p,
 					     service_p->serviceID, 
 					     IS_IPV4);
     bzero(&info, sizeof(info));
-    if (ipv4_service_p != NULL) {
+    if (ipv4_service_p != NULL && ServiceIsPublished(ipv4_service_p)) {
 	(void)config_method_event(ipv4_service_p, IFEventID_get_dhcp_info_e,
 				  &info);
     }
@@ -3734,11 +3781,36 @@ ServiceIPv6CopyMergedDNSAndCaptive(ServiceRef service_p,
     return (dns);
 }
 
+STATIC void
+ipv6_dict_add_delegated_prefix(CFMutableDictionaryRef dict,
+			       const struct in6_addr * prefix_p,
+			       uint8_t prefix_length,
+			       uint32_t valid_lifetime,
+			       uint32_t preferred_lifetime)
+{
+    if (prefix_length == 0
+	|| IN6_IS_ADDR_UNSPECIFIED(prefix_p)) {
+	return;
+    }
+    my_CFDictionarySetIPv6AddressAsString(dict,
+					  kSCPropNetIPv6DelegatedPrefix,
+					  prefix_p);
+    my_CFDictionarySetUInt64(dict,
+			     kSCPropNetIPv6DelegatedPrefixLength,
+			     prefix_length);
+    my_CFDictionarySetUInt64(dict,
+			     kSCPropNetIPv6DelegatedPrefixValidLifetime,
+			     valid_lifetime);
+    my_CFDictionarySetUInt64(dict,
+			     kSCPropNetIPv6DelegatedPrefixPreferredLifetime,
+			     preferred_lifetime);
+}
+
 PRIVATE_EXTERN void
 ServicePublishSuccessIPv6(ServiceRef service_p,
 			  inet6_addrinfo_t * addresses, int addresses_count,
 			  const struct in6_addr * router, int router_count,
-			  ipv6_info_t * ipv6_info_p,
+			  ipv6_info_t * info_p,
 			  CFStringRef signature)
 {
     CFDictionaryRef		dhcp_dict = NULL;
@@ -3748,20 +3820,16 @@ ServicePublishSuccessIPv6(ServiceRef service_p,
     CFStringRef			entities_summary;
     int				entity_count;
     const char *		extra_string;
+    boolean_t			has_addresses;
     interface_t *		if_p = service_interface(service_p);
     IFStateRef			ifstate = service_ifstate(service_p);
     CFDictionaryRef		ipv4_dict = NULL;
     CFMutableDictionaryRef	ipv6_dict = NULL;
-    CFStringRef			nat64_prefix = NULL;
-    DHCPv6OptionListRef		options = NULL;
     boolean_t			perform_plat_discovery = FALSE;
     CFDictionaryRef		rank_dict = NULL;
     CFDictionaryRef		values[N_PUBLISH_ENTITIES];
 
     if (service_p->serviceID == NULL) {
-	return;
-    }
-    if (addresses == NULL || addresses_count == 0) {
 	return;
     }
     ServiceSetIsPublished(service_p);
@@ -3770,37 +3838,58 @@ ServicePublishSuccessIPv6(ServiceRef service_p,
 	/* configd is not running */
 	return;
     }
-
-    if (ipv6_info_p != NULL) {
-	options = ipv6_info_p->options;
-	ipv4_dict = ipv6_info_p->ipv4_dict;
-	nat64_prefix = ipv6_info_p->nat64_prefix;
-	if (nat64_prefix == NULL) {
-	    /* the prefix isn't already known, discover PLAT if told to do so */
-	    perform_plat_discovery = ipv6_info_p->perform_plat_discovery;
-	}
-    }
+    has_addresses
+	= (addresses != NULL && addresses_count != 0);
 
     /* IPv6 */
     ipv6_dict = CFDictionaryCreateMutable(NULL, 0,
 					  &kCFTypeDictionaryKeyCallBacks,
 					  &kCFTypeDictionaryValueCallBacks);
+    if (info_p != NULL && info_p->is_stateful) {
+	/* DelegatedPrefix information */
+	ipv6_dict_add_delegated_prefix(ipv6_dict,
+				       &info_p->prefix,
+				       info_p->prefix_length,
+				       info_p->prefix_valid_lifetime,
+				       info_p->prefix_preferred_lifetime);
+    }
 
     /* Addresses, PrefixLength */
-    dict_set_inet6_info(ipv6_dict, addresses, addresses_count);
+    if (has_addresses) {
+	CFStringRef	nat64_prefix = NULL;
 
-    /* Router */
-    if (router != NULL) {
-	my_CFDictionarySetIPv6AddressAsString(ipv6_dict,
-					      kSCPropNetIPv6Router,
-					      router);
-    }
-    /* NAT64 Prefix */
+	if (info_p != NULL) {
+	    nat64_prefix = info_p->nat64_prefix;
+	    ipv4_dict = info_p->ipv4_dict;
 #ifndef kSCPropNetIPv6NAT64Prefix
 #define kSCPropNetIPv6NAT64Prefix	CFSTR("NAT64Prefix")
 #endif /* kSCPropNetIPv6NAT64Prefix */
-    if (nat64_prefix != NULL) {
-	CFDictionarySetValue(ipv6_dict, kSCPropNetIPv6NAT64Prefix, nat64_prefix);
+	    /* NAT64 Prefix */
+	    if (nat64_prefix != NULL) {
+		CFDictionarySetValue(ipv6_dict, kSCPropNetIPv6NAT64Prefix,
+				     nat64_prefix);
+	    }
+	    else if (ipv4_dict == NULL) {
+		/* prefix isn't already known, discover PLAT if told to do so */
+		perform_plat_discovery = info_p->perform_plat_discovery;
+		if (perform_plat_discovery) {
+		    CFDictionarySetValue(ipv6_dict,
+					 kSCPropNetIPv6PerformPLATDiscovery,
+					 kCFBooleanTrue);
+		}
+	    }
+	}
+	dict_set_inet6_info(ipv6_dict, addresses, addresses_count);
+	/* Router */
+	if (router != NULL) {
+	    my_CFDictionarySetIPv6AddressAsString(ipv6_dict,
+						  kSCPropNetIPv6Router,
+					      router);
+	}
+	/* DNS and Captive Portal */
+	dns_dict = ServiceIPv6CopyMergedDNSAndCaptive(service_p,
+						      info_p,
+						      &capport_dict);
     }
 
     /* InterfaceName */
@@ -3817,20 +3906,10 @@ ServicePublishSuccessIPv6(ServiceRef service_p,
 				 signature);
 	}
     }
-    /* PerformPLATDiscovery */
-    if (perform_plat_discovery) {
-	CFDictionarySetValue(ipv6_dict, kSCPropNetIPv6PerformPLATDiscovery,
-			     kCFBooleanTrue);
-    }
-
-    /* DNS and Captive Portal */
-    dns_dict = ServiceIPv6CopyMergedDNSAndCaptive(service_p,
-						  ipv6_info_p,
-						  &capport_dict);
 
     /* DHCPv6 */
-    if (options != NULL) {
-	dhcp_dict = DHCPv6InfoDictionaryCreate(options);
+    if (info_p != NULL) {
+	dhcp_dict = DHCPv6InfoDictionaryCreate(info_p);
     }
 
     /*
@@ -3856,7 +3935,9 @@ ServicePublishSuccessIPv6(ServiceRef service_p,
      * demote the rank to RankLast to allow a fully dual-stack
      * or NAT64 service to get priority.
      */
-    if (!service_interface_ipv4_published(service_p) && ipv4_dict == NULL) {
+    if (has_addresses
+	&& !service_interface_ipv4_published(service_p)
+	&& ipv4_dict == NULL) {
 	/* demote the service to RankLast */
 	const void *	key = kSCPropNetServicePrimaryRank;
 	const void *	rank = kSCValNetServicePrimaryRankLast;
@@ -3906,6 +3987,26 @@ ServicePublishSuccessIPv6(ServiceRef service_p,
 	   if_name(ifstate->if_p),
 	   entities_summary, extra_string);
     my_CFRelease(&entities_summary);
+    return;
+}
+
+void
+ServiceUnpublishCLAT46(ServiceRef service_p)
+{
+    if (service_clat46_is_active(service_p)) {
+	CFTypeRef	entity = kSCEntNetIPv4;
+	IFStateRef	ifstate = service_ifstate(service_p);
+	CFDictionaryRef	value = NULL;
+
+	my_log(LOG_NOTICE,
+	       "%s %s: unpublish IPv4 (CLAT46)",
+	       ipconfig_method_string(service_p->method),
+	       if_name(ifstate->if_p));
+	my_SCDynamicStoreSetService(S_scd_session,
+				    service_p->serviceID,
+				    &entity, &value, 1,
+				    service_p->no_publish);
+    }
     return;
 }
 
@@ -3993,6 +4094,9 @@ ipconfig_method_to_cfstring(ipconfig_method_t method)
         case ipconfig_method_linklocal_v6_e:
             str = kSCValNetIPv6ConfigMethodLinkLocal;
             break;
+	case ipconfig_method_dhcpv6_pd_e:
+	    str = kSCValNetIPv6ConfigMethodDHCPv6PD;
+	    break;
         default:
             str = CFSTR("<unknown>");
             break;
@@ -5778,6 +5882,9 @@ lookup_func(ipconfig_method_t method)
 	    func = linklocal_v6_thread;
 	}
 	break;
+    case ipconfig_method_dhcpv6_pd_e:
+	func = dhcpv6_pd_thread;
+	break;
     default:
 	break;
     }
@@ -6437,6 +6544,29 @@ refresh_service(const char * ifname, ServiceID service_id)
 }
 
 PRIVATE_EXTERN ipconfig_status_t
+is_service_valid(const char * ifname, ServiceID service_id)
+{
+    IFStateRef		ifstate;
+    CFStringRef		serviceID;
+    ServiceRef		service_p;
+    ipconfig_status_t	status;
+
+    serviceID = ServiceIDCreateCFString(service_id);
+    if (serviceID == NULL) {
+	return (ipconfig_status_allocation_failed_e);
+    }
+    ifstate = S_find_service_with_id(ifname, serviceID, &service_p);
+    if (ifstate == NULL) {
+	status = ipconfig_status_no_such_service_e;
+    }
+    else {
+	status = ipconfig_status_success_e;
+    }
+    CFRelease(serviceID);
+    return (status);
+}
+
+PRIVATE_EXTERN ipconfig_status_t
 forget_network(const char * name, CFStringRef ssid)
 {
     IFStateRef		ifstate;
@@ -6448,7 +6578,7 @@ forget_network(const char * name, CFStringRef ssid)
     if (ifstate == NULL) {
 	return (ipconfig_status_interface_does_not_exist_e);
     }
-    if (!if_is_wireless(ifstate->if_p)) {
+    if (!if_is_wifi_infra(ifstate->if_p)) {
 	/* not wireless */
 	return (ipconfig_status_invalid_parameter_e);
     }
@@ -6664,6 +6794,9 @@ ipconfig_method_from_cfstring_ipv6(CFStringRef m, ipconfig_method_t * method)
     else if (CFEqual(m, kSCValNetIPv6ConfigMethodLinkLocal)) {
 	*method = ipconfig_method_linklocal_v6_e;
     }
+    else if (CFEqual(m, kSCValNetIPv6ConfigMethodDHCPv6PD)) {
+	*method = ipconfig_method_dhcpv6_pd_e;
+    }
     else {
 	return (FALSE);
     }
@@ -6807,6 +6940,59 @@ method_info_from_ipv6_dict(CFDictionaryRef dict,
 		}
 		break;
 	    }
+	}
+    }
+    else if (info->method == ipconfig_method_dhcpv6_pd_e) {
+	CFStringRef				prefix;
+	CFNumberRef				prefix_length;
+	ipconfig_method_data_dhcpv6_pd_t 	dhcpv6_pd;
+
+	dhcpv6_pd = &method_data->dhcpv6_pd;
+	prefix  = CFDictionaryGetValue(dict, kSCPropNetIPv6RequestedPrefix);
+	if (prefix != NULL) {
+	    char 	ntopbuf[INET6_ADDRSTRLEN];
+
+	    if (isA_CFString(prefix) == NULL) {
+		my_log(LOG_NOTICE,
+		       "%s: %@ not a string", __func__,
+		       kSCPropNetIPv6RequestedPrefix);
+		goto done;
+	    }
+	    if (!my_CFStringToIPv6Address(prefix,
+					  &dhcpv6_pd->requested_prefix)) {
+		my_log(LOG_NOTICE,
+		       "%s: %@ not an IPv6 address", __func__,
+		       kSCPropNetIPv6RequestedPrefix);
+		goto done;
+	    }
+	    inet_ntop(AF_INET6, &dhcpv6_pd->requested_prefix,
+		      ntopbuf, sizeof(ntopbuf));
+	}
+	prefix_length
+	    = CFDictionaryGetValue(dict,
+				   kSCPropNetIPv6RequestedPrefixLength);
+	if (prefix_length != NULL) {
+	    uint32_t	len;
+
+	    if (isA_CFNumber(prefix_length) == NULL) {
+		my_log(LOG_NOTICE,
+		       "%s: %@ not a number", __func__,
+		       kSCPropNetIPv6RequestedPrefixLength);
+		goto done;
+	    }
+	    if (!my_CFTypeToNumber(prefix_length, &len)) {
+		my_log(LOG_NOTICE,
+		       "%s: %@ invalid number", __func__,
+		       kSCPropNetIPv6RequestedPrefixLength);
+		goto done;
+	    }
+	    if (len > 128) {
+		my_log(LOG_NOTICE,
+		       "%s: %@ %d > 128", __func__,
+		       kSCPropNetIPv6RequestedPrefixLength, len);
+		goto done;
+	    }
+	    dhcpv6_pd->requested_prefix_length = len;
 	}
     }
     status = ipconfig_status_success_e;
@@ -7280,6 +7466,7 @@ ServiceConfigListLookupMethod(ServiceConfigListRef scl,
     ServiceConfigRef	scan;
 
     switch (info->method) {
+    case ipconfig_method_dhcpv6_pd_e:
     case ipconfig_method_stf_e:
     case ipconfig_method_linklocal_e:
     case ipconfig_method_linklocal_v6_e:
@@ -7926,7 +8113,7 @@ IFState_update_link_event_data(IFStateRef ifstate, link_event_data_t link_event,
 
     bzero(link_event, sizeof(*link_event));
     link_event->link_status = *link_status_p;
-    if (if_is_wireless(if_p)) {
+    if (if_is_wifi_infra(if_p)) {
 	WiFiInfoRef		info_p;
 
 	info_p = S_copy_wifi_info(ifstate->ifname);
@@ -8487,25 +8674,26 @@ S_copy_wifi_info(CFStringRef ifname)
     info_p = WiFiInfoCopy(ifname);
     if (info_p != NULL) {
 	char		bssid[LINK_ADDR_ETHER_STR_LEN];
+	CFStringRef	bssid_label;
 	CFStringRef	networkID;
 
-	link_addr_to_string(bssid, sizeof(bssid),
-			    (const uint8_t *)WiFiInfoGetBSSID(info_p),
-			    ETHER_ADDR_LEN);
+	bssid_label = bssid_to_string(bssid, sizeof(bssid), info_p);
 	networkID = WiFiInfoGetNetworkID(info_p);
 	if (networkID == NULL) {
 	    my_log(LOG_NOTICE,
-		   "%@: SSID %@ BSSID %s Security %s",
+		   "%@: SSID %@ %@ %s Security %s",
 		   ifname,
 		   WiFiInfoGetSSID(info_p),
+		   bssid_label,
 		   bssid,
 		   WiFiAuthTypeGetString(WiFiInfoGetAuthType(info_p)));
 	}
 	else {
 	    my_log(LOG_NOTICE,
-		   "%@: SSID %@ BSSID %s NetworkID %@ Security %s",
+		   "%@: SSID %@ %@ %s NetworkID %@ Security %s",
 		   ifname,
 		   WiFiInfoGetSSID(info_p),
+		   bssid_label,
 		   bssid,
 		   networkID,
 		   WiFiAuthTypeGetString(WiFiInfoGetAuthType(info_p)));
@@ -8568,7 +8756,7 @@ ap_key_changed(SCDynamicStoreRef session, CFStringRef cache_key)
 	goto done;
     }
     link = if_link_status_update(if_p);
-    if (if_is_wireless(ifstate->if_p) == FALSE) {
+    if (if_is_wifi_infra(ifstate->if_p) == FALSE) {
 	goto done;
     }
     if ((link.valid && !link.active)
@@ -9568,6 +9756,27 @@ S_add_dhcp_parameters(SCPreferencesRef prefs)
     return;
 }
 
+#if TARGET_OS_OSX
+STATIC void
+check_hide_bssid(void)
+{
+    Boolean	hide_bssid;
+    Boolean	was_set = FALSE;
+
+    hide_bssid = IPConfigurationControlPrefsGetHideBSSID(TRUE, &was_set);
+    if (!was_set) {
+	/* hide the BSSID except on AppleInternal */
+	hide_bssid = !_SC_isAppleInternal();
+    }
+    if (hide_bssid != S_hide_bssid) {
+	S_hide_bssid = hide_bssid;
+	my_log(LOG_NOTICE,
+	       "IPConfiguration: BSSID privacy is %s",
+	       hide_bssid ? "enabled" : "disabled");
+    }
+}
+#endif /* TARGET_OS_OSX */
+
 STATIC void
 check_prefs(SCPreferencesRef prefs)
 {
@@ -9576,7 +9785,7 @@ check_prefs(SCPreferencesRef prefs)
     IPConfigurationInterfaceTypes	if_types;
     Boolean				verbose;
 
-    verbose = IPConfigurationControlPrefsGetVerbose();
+    verbose = IPConfigurationControlPrefsGetVerbose(FALSE);
     if (G_IPConfiguration_verbose != verbose) {
 	G_IPConfiguration_verbose = verbose;
 	if (verbose) {
@@ -9599,14 +9808,14 @@ check_prefs(SCPreferencesRef prefs)
 	G_awd_interface_types = if_types;
     }
     cellular_clat46_auto_enable
-	= IPConfigurationControlPrefsGetCellularCLAT46AutoEnable();
+	= IPConfigurationControlPrefsGetCellularCLAT46AutoEnable(FALSE);
     if (S_cellular_clat46_autoenable != cellular_clat46_auto_enable) {
 	my_log(LOG_NOTICE, "IPConfiguration: cellular CLAT46 %sauto-enabled",
 	       cellular_clat46_auto_enable ? "" : "not ");
 	S_cellular_clat46_autoenable = cellular_clat46_auto_enable;
     }
     ipv6_linklocal_modifier_expires
-	= IPConfigurationControlPrefsGetIPv6LinkLocalModifierExpires();
+	= IPConfigurationControlPrefsGetIPv6LinkLocalModifierExpires(TRUE);
     if (S_ipv6_linklocal_modifier_expires
 	!= ipv6_linklocal_modifier_expires) {
 	my_log(LOG_NOTICE,
@@ -9644,6 +9853,10 @@ check_prefs(SCPreferencesRef prefs)
 	    break;
 	}
     }
+#if TARGET_OS_OSX
+    check_hide_bssid();
+#endif /* TARGET_OS_OSX */
+
     IPConfigurationControlPrefsSynchronize();
     return;
 }

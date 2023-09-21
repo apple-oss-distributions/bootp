@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2000-2023 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -157,6 +157,7 @@ IPConfigFunc rtadv_thread;
 IPConfigFunc stf_thread;
 IPConfigFunc manual_v6_thread;
 IPConfigFunc linklocal_v6_thread;
+IPConfigFunc dhcpv6_pd_thread;
 
 /*
  * more globals
@@ -312,6 +313,9 @@ ServiceSetBusy(ServiceRef service_p, boolean_t busy);
 
 void
 ServiceDetachIPv4(ServiceRef service_p);
+
+void
+ServiceUnpublishCLAT46(ServiceRef service_p);
 
 void
 service_publish_failure(ServiceRef service_p, ipconfig_status_t status);

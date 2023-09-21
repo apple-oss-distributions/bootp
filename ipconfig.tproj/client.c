@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2023 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -1286,6 +1286,30 @@ S_refresh_service(mach_port_t server, int argc, char * argv[])
 }
 
 static int
+S_is_service_valid(mach_port_t server, int argc, char * argv[])
+{
+    InterfaceName		name;
+    kern_return_t		kret;
+    ServiceID			service_id;
+    ipconfig_status_t		status = ipconfig_status_success_e;
+
+    ServiceIDInit(service_id, argv[0]);
+    InterfaceNameInit(name, argv[1]);
+    kret = ipconfig_is_service_valid(server, name, service_id, &status);
+    if (kret != KERN_SUCCESS) {
+	mach_error("ipconfig_is_service_valid", kret);
+	return (1);
+    }
+    if (status != ipconfig_status_success_e) {
+	fprintf(stderr, "%s %s: not valid, %s\n",
+		service_id, name, ipconfig_status_string(status));
+	return (1);
+    }
+    printf("%s %s valid\n", service_id, name);
+    return (0);
+}
+
+static int
 S_set_awd_interfaces(mach_port_t server, int argc, char * argv[])
 {
     IPConfigurationInterfaceTypes	types;
@@ -1404,6 +1428,26 @@ S_forget_network(mach_port_t server, int argc, char * argv[])
     return (0);
 }
 
+#if TARGET_OS_OSX
+static int
+S_set_hide_BSSID(mach_port_t server, int argc, char * argv[])
+{
+    int			enable;
+
+    errno = 0;
+    enable = (int)strtol(argv[0], NULL, 0);
+    if (enable == 0 && errno != 0) {
+        fprintf(stderr, "conversion to integer of %s failed\n", argv[0]);
+        return (1);
+    }
+    if (!IPConfigurationControlPrefsSetHideBSSID(enable != 0)) {
+        fprintf(stderr, "failed to hide BSSID\n");
+        return (1);
+    }
+    return (0);
+}
+#endif
+
 static const struct command_info {
     const char *command;
     funcptr_t	func;
@@ -1459,11 +1503,16 @@ static const struct command_info {
       0, 0 },
     { "refreshService", S_refresh_service, 2, 
       "<service ID> <interface name>", 0, 0 },
+    { "isServiceValid", S_is_service_valid, 2,
+      "<service ID> <interface name>", 0, 0 },
     { "setawdinterfaces", S_set_awd_interfaces, 0, "[ All | Cellular | None ]", 0, 1 },
     { "getawdinterfaces", S_get_awd_interfaces, 0, NULL, 0, 1 },
     { "setdhcpduidtype", S_set_dhcp_duid_type, 0, "[ ll | llt | uuid ]", 0, 1 },
     { "getdhcpduidtype", S_get_dhcp_duid_type, 0, NULL, 0, 1 },
     { "forgetNetwork", S_forget_network, 2, "<interface name> <ssid>", 0, 0},
+#if TARGET_OS_OSX
+    { "setHideBSSID", S_set_hide_BSSID, 1, "0 | 1", 0, 1},
+#endif
     { NULL, NULL, 0, NULL, 0, 0 },
 };
 
