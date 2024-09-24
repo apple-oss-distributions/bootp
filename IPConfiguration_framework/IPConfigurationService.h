@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2024 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -88,6 +88,14 @@ extern const CFStringRef	kIPConfigurationServiceOptionIPv6LinkLocalAddress; /* s
  * - applies to IPv6 service only
  */
 extern const CFStringRef	kIPConfigurationServiceOptionEnableDAD; /* boolean */
+
+/*
+ * kIPConfigurationServiceOptionEnableDHCPv6 (CFBooleanRef)
+ * - specify whether to enable the DHCPv6 client
+ * - default is FALSE for IFT_CELLULAR, TRUE otherwise
+ * - applies to IPv6 Automatic service only
+ */
+extern const CFStringRef	kIPConfigurationServiceOptionEnableDHCPv6; /* boolean */
 
 /*
  * kIPConfigurationServiceOptionEnableCLAT46 (CFBooleanRef, default FALSE)

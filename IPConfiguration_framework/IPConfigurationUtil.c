@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Apple Inc. All rights reserved.
+ * Copyright (c) 2018-2023 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -47,6 +47,7 @@
 #include "cfutil.h"
 #include "IPConfigurationLog.h"
 #include "symbol_scope.h"
+#include "IPConfigurationPrivate.h"
 
 STATIC CFDictionaryRef
 create_network_dict(CFStringRef ssid)
@@ -72,9 +73,14 @@ IPConfigurationForgetNetwork(CFStringRef interface_name, CFStringRef ssid)
     void *			xml_data_ptr = NULL;
     int				xml_data_len = 0;
 
+    _IPConfigurationInitLog(kIPConfigurationLogCategoryLibrary);
+
     if (interface_name == NULL || ssid == NULL) {
+	IPConfigLog(LOG_NOTICE, "%s: interface and SSID must not be NULL",
+		    __func__);
 	return (FALSE);
     }
+
     kret = ipconfig_server_port(&server);
     if (kret != BOOTSTRAP_SUCCESS) {
 	IPConfigLog(LOG_NOTICE,

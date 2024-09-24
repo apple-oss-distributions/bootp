@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2011-2024 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <string.h>
@@ -44,7 +45,6 @@
 #include <pthread.h>
 #include <mach/mach_error.h>
 #include <mach/mach_port.h>
-#include <libkern/OSAtomic.h>
 #include "ipconfig_types.h"
 #include "ipconfig_ext.h"
 #include "symbol_scope.h"
@@ -53,12 +53,16 @@
 #include "IPConfigurationLog.h"
 #include "IPConfigurationServiceInternal.h"
 #include "IPConfigurationService.h"
+#include "IPConfigurationPrivate.h"
 
 const CFStringRef 
 kIPConfigurationServiceOptionEnableDAD = _kIPConfigurationServiceOptionEnableDAD;
 
 const CFStringRef
 kIPConfigurationServiceOptionEnableCLAT46 = _kIPConfigurationServiceOptionEnableCLAT46;
+
+const CFStringRef
+kIPConfigurationServiceOptionEnableDHCPv6 = _kIPConfigurationServiceOptionEnableDHCPv6;
 
 const CFStringRef
 kIPConfigurationServiceOptionMTU = _kIPConfigurationServiceOptionMTU;
@@ -85,74 +89,6 @@ STATIC const CFStringRef kSCPropNetIPv6LinkLocalAddress = CFSTR("LinkLocalAddres
 
 const CFStringRef
 kIPConfigurationServiceOptionClearState = _kIPConfigurationServiceOptionClearState;
-
-/**
- ** ObjectWrapper
- **/
-
-struct ObjectWrapper {
-    const void *	obj;
-    int32_t		retain_count;
-};
-
-PRIVATE_EXTERN const void *
-ObjectWrapperRetain(const void * info)
-{
-    ObjectWrapperRef 	wrapper = (ObjectWrapperRef)info;
-
-    (void)OSAtomicIncrement32(&wrapper->retain_count);
-#ifdef DEBUG
-    printf("wrapper retain (%d)\n", new_val);
-#endif
-    return (info);
-}
-
-PRIVATE_EXTERN const void *
-ObjectWrapperGetObject(ObjectWrapperRef wrapper)
-{
-    return (wrapper->obj);
-}
-
-PRIVATE_EXTERN void
-ObjectWrapperClearObject(ObjectWrapperRef wrapper)
-{
-    wrapper->obj = NULL;
-}
-
-PRIVATE_EXTERN ObjectWrapperRef
-ObjectWrapperAlloc(const void * obj)
-{
-    ObjectWrapperRef	wrapper;
-
-    wrapper = (ObjectWrapperRef)malloc(sizeof(*wrapper));
-    wrapper->obj = obj;
-    wrapper->retain_count = 1;
-    return (wrapper);
-}
-
-PRIVATE_EXTERN void
-ObjectWrapperRelease(const void * info)
-{
-    int32_t		new_val;
-    ObjectWrapperRef 	wrapper = (ObjectWrapperRef)info;
-
-    new_val = OSAtomicDecrement32(&wrapper->retain_count);
-#ifdef DEBUG
-    printf("wrapper release (%d)\n", new_val);
-#endif
-    if (new_val == 0) {
-#ifdef DEBUG
-	printf("wrapper free\n");
-#endif
-	free(wrapper);
-    }
-    else if (new_val < 0) {
-	IPConfigLogFL(LOG_NOTICE,
-		      "IPConfigurationService: retain count already zero");
-	abort();
-    }
-    return;
-}
 
 /**
  ** IPConfigurationService
@@ -267,23 +203,10 @@ __IPConfigurationServiceDeallocate(CFTypeRef cf)
 }
 
 STATIC void
-init_log(void)
-{
-    static os_log_t handle;
-
-    if (handle == NULL) {
-	handle = os_log_create(kIPConfigurationLogSubsystem,
-			       kIPConfigurationLogCategoryLibrary);
-	IPConfigLogSetHandle(handle);
-    }
-    return;
-}
-
-STATIC void
 __IPConfigurationServiceInitialize(void)
 {
     /* initialize logging */
-    init_log();
+    _IPConfigurationInitLog(kIPConfigurationLogCategoryLibrary);
 
     /* initialize runtime */
     __kIPConfigurationServiceTypeID 
@@ -325,6 +248,7 @@ typedef struct {
     CFStringRef			ll_addr;
     CFBooleanRef		enable_dad;
     CFBooleanRef		enable_clat46;
+    CFBooleanRef		enable_dhcpv6;
 } IPv6Config, * IPv6ConfigRef;
 
 typedef struct {
@@ -468,7 +392,7 @@ createIPv4Entity(IPv4ConfigRef v4)
 STATIC CFDictionaryRef
 config_dict_create(CFStringRef serviceID, ConfigParamsRef params)
 {
-#define N_KEYS_VALUES	9
+#define N_KEYS_VALUES	10
     int			count;
     CFDictionaryRef	config_dict;
     CFBooleanRef	clear_state;
@@ -548,6 +472,13 @@ config_dict_create(CFStringRef serviceID, ConfigParamsRef params)
 	if (params->v6.enable_clat46 != NULL) {
 	    keys[count] = kIPConfigurationServiceOptionEnableCLAT46;
 	    values[count] = params->v6.enable_clat46;
+	    count++;
+	}
+	/* 9 */
+	/* enable DHCPv6 */
+	if (params->v6.enable_dhcpv6 != NULL) {
+	    keys[count] = kIPConfigurationServiceOptionEnableDHCPv6;
+	    values[count] = params->v6.enable_dhcpv6;
 	    count++;
 	}
     }
@@ -796,6 +727,11 @@ init_ipv6_params(CFDictionaryRef options, IPv6ConfigRef v6)
     if (!plist_validate_bool(options,
 			     kIPConfigurationServiceOptionEnableCLAT46,
 			     &v6->enable_clat46)) {
+	goto done;
+    }
+    if (!plist_validate_bool(options,
+			     kIPConfigurationServiceOptionEnableDHCPv6,
+			     &v6->enable_dhcpv6)) {
 	goto done;
     }
     ip_dict = CFDictionaryGetValue(options,
