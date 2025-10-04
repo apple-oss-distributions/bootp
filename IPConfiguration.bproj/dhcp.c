@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2025 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -275,6 +275,7 @@ static const uint8_t dhcp_static_default_params[] = {
     dhcptag_ipv6_only_preferred_e,
     dhcptag_proxy_auto_discovery_url_e,
     dhcptag_captive_portal_url_e,
+    dhcptag_encrypted_dns_server_e,
 #if TARGET_OS_OSX
     dhcptag_ldap_url_e,
     dhcptag_nb_over_tcpip_name_server_e,
@@ -472,10 +473,16 @@ add_host_name(ServiceRef service_p, dhcpoa_t * options_p)
 
     privacy_required = ServiceIsPrivacyRequired(service_p, &share_device_type);
     if (!privacy_required) {
-	/* add the computer name if privacy is not required */
-	name = computer_name();
-	my_log(LOG_NOTICE, "DHCP %s: supplying hostname '%s'",
-	       if_name(if_p), name);
+	/* add the dhcp hostname if privacy is not required */
+	name = get_dhcp_hostname();
+	if (name != NULL) {
+		my_log(LOG_NOTICE, "DHCP %s: supplying hostname '%s'",
+		       if_name(if_p), name);
+	}
+	else {
+		my_log(LOG_NOTICE, "DHCP %s: hostname is NULL",
+		       if_name(if_p));
+	}
     }
     else if (share_device_type) {
 	/* privacy is required, but sharing the device type is allowed */
@@ -830,10 +837,10 @@ inform_success(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	    inform->our_mask = *((struct in_addr *)option);
 
 	    /* reset the interface address with the new mask */
-	    (void)service_set_address(service_p,
-				      service_requested_ip_addr(service_p),
-				      inform->our_mask,
-				      G_ip_zeroes);
+	    service_set_address(service_p,
+				service_requested_ip_addr(service_p),
+				inform->our_mask,
+				G_ip_zeroes);
 	}
 	inform_cancel_pending_events(service_p);
 	inform->resolve_router_timed_out = FALSE;
@@ -1100,7 +1107,7 @@ inform_start(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 		  }
 		  my_log(LOG_NOTICE, "INFORM %s: %s", if_name(if_p),
 			 msg);
-		  (void)service_remove_address(service_p);
+		  service_remove_address(service_p);
 		  inform_failed(service_p, ipconfig_status_address_in_use_e);
 		  /* try again in a bit */
 		  if (G_manual_conflict_retry_interval_secs > 0) {
@@ -1124,10 +1131,10 @@ inform_start(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	  mask = (inform->our_mask.s_addr != 0)
 	      ? inform->our_mask
 	      : G_ip_broadcast;
-	  (void)service_set_address(service_p,
-				    service_requested_ip_addr(service_p),
-				    mask,
-				    G_ip_zeroes);
+	  service_set_address(service_p,
+			      service_requested_ip_addr(service_p),
+			      mask,
+			      G_ip_zeroes);
 	  ServiceRemoveAddressConflict(service_p);
 	  inform_request(service_p, IFEventID_start_e, 0);
 	  break;
@@ -1279,9 +1286,9 @@ inform_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	      service_set_requested_ip_mask(service_p, 
 					    method_data->manual.mask);
 	      inform->our_mask = method_data->manual.mask;
-	      (void)service_set_address(service_p,
-					method_data->manual.addr,
-					inform->our_mask, G_ip_zeroes);
+	      service_set_address(service_p,
+				  method_data->manual.addr,
+				  inform->our_mask, G_ip_zeroes);
 	  }
 	  return (ipconfig_status_success_e);
       }
@@ -1704,7 +1711,7 @@ switch_to_lease(ServiceRef service_p, DHCPLeaseRef lease_p, boolean_t is_load)
 	}
     }
     /* make sure we stop using the old IP address */
-    (void)service_remove_address(service_p);
+    service_remove_address(service_p);
     if (lease_p->pkt_length > sizeof(dhcp->saved.pkt)) {
 	dhcp->saved.pkt_size = sizeof(dhcp->saved.pkt);
     }
@@ -1801,7 +1808,7 @@ dhcp_check_lease(ServiceRef service_p, absolute_time_t current_time)
 	    && (current_time >= dhcp->lease.expiration)) {
 	    dhcp_invalidate_lease(dhcp);
 	    service_router_clear(service_p);
-	    (void)service_remove_address(service_p);
+	    service_remove_address(service_p);
 	    service_publish_failure(service_p,
 				    ipconfig_status_lease_expired_e);
 	}
@@ -1854,7 +1861,9 @@ dhcp_check_link_with_status(ServiceRef service_p, IFEventID_t event_id,
 
 	    /* try to switch to new lease */
 	    my_log(LOG_NOTICE, "%s: SSID is now %@ (was %@)",
-		   if_name(if_p), ssid, dhcp->lease.ssid);
+		   if_name(if_p),
+		   hide_wifi_string(ssid),
+		   hide_wifi_string(dhcp->lease.ssid));
 	    where = DHCPLeaseListFindLeaseForWiFi(&dhcp->lease_list,
 						  ssid, networkID);
 	    if (where != DHCP_LEASE_NOT_FOUND) {
@@ -1863,8 +1872,11 @@ dhcp_check_link_with_status(ServiceRef service_p, IFEventID_t event_id,
 	    }
 	    else {
 		/* go back to INIT state */
-		my_log(LOG_NOTICE, "%s: No lease for %@", if_name(if_p), ssid);
+		my_log(LOG_NOTICE, "%s: No lease for %@", if_name(if_p),
+		       hide_wifi_string(ssid));
 		dhcp_invalidate_lease(dhcp);
+		service_router_clear(service_p);
+		(void)service_remove_address(service_p);
 	    }
 	    /* we switched networks, start over */
 	    dhcp->try = 0;
@@ -1873,13 +1885,15 @@ dhcp_check_link_with_status(ServiceRef service_p, IFEventID_t event_id,
 	    if (bcmp(dhcp->lease.wifi_mac, if_link_address(if_p),
 		     sizeof(dhcp->lease.wifi_mac)) != 0) {
 		my_log(LOG_NOTICE, "%s: discarding lease for %@, MAC mismatch",
-		       if_name(if_p), ssid);
+		       if_name(if_p), hide_wifi_string(ssid));
 		dhcp_invalidate_lease(dhcp);
+		service_router_clear(service_p);
+		(void)service_remove_address(service_p);
 		dhcp->try = 0;
 	    }
 	    else {
 		my_log(LOG_NOTICE, "%s: using lease for %@",
-		       if_name(if_p), ssid);
+		       if_name(if_p), hide_wifi_string(ssid));
 	    }
 	    dhcp->lease.wifi_mac_is_set = FALSE;
 	}
@@ -2222,7 +2236,7 @@ dhcp_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	      status = ipconfig_status_allocation_failed_e;
 	      goto stop;
 	  }
-	  (void)service_enable_autoaddr(service_p);
+	  service_enable_autoaddr(service_p);
 	  dhcp->client = bootp_client_init(if_p);
 	  if (dhcp->client == NULL) {
 	      my_log(LOG_NOTICE, "DHCP %s: bootp_client_init failed",
@@ -2363,7 +2377,7 @@ dhcp_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	  link_event = (link_event_data_t)event_data;
 	  if (link_event->info == kLinkInfoNetworkChanged) {
 	      /* switched networks, remove IP address to avoid IP collisions */
-	      (void)service_remove_address(service_p);
+	      service_remove_address(service_p);
 	      service_publish_failure(service_p,
 				      ipconfig_status_network_changed_e);
 	      linklocal_service_change(service_p, LINKLOCAL_NO_ALLOCATE);
@@ -2517,7 +2531,8 @@ dhcp_thread(ServiceRef service_p, IFEventID_t event_id, void * event_data)
       case IFEventID_forget_ssid_e: {
 	  CFStringRef	ssid = (CFStringRef)event_data;
 
-	  my_log(LOG_NOTICE, "DHCP %s: ForgetSSID %@", if_name(if_p), ssid);
+	  my_log(LOG_NOTICE, "DHCP %s: ForgetSSID %@", if_name(if_p),
+		 hide_wifi_string(ssid));
 	  DHCPLeaseListRemoveLeaseForWiFi(&dhcp->lease_list, ssid, NULL);
 	  if (dhcp->lease.ssid != NULL && CFEqual(dhcp->lease.ssid, ssid)) {
 	      struct timeval	tv;
@@ -2693,7 +2708,7 @@ dhcp_init(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	  dhcp->gathering = FALSE;
 	  dhcp->saved.rating = 0;
 	  dhcp->got_nak = FALSE;
-	  (void)service_enable_autoaddr(service_p);
+	  service_enable_autoaddr(service_p);
 	  bootp_client_enable_receive(dhcp->client,
 				      (bootp_receive_func_t *)dhcp_init, 
 				      service_p, (void *)IFEventID_data_e);
@@ -2967,7 +2982,7 @@ dhcp_init_reboot(ServiceRef service_p, IFEventID_t evid, void * event_data)
 	  dhcp->xid++;
 	  dhcp->saved.our_ip = our_ip;
 	  dhcp->saved.rating = 0;
-	  (void)service_enable_autoaddr(service_p);
+	  service_enable_autoaddr(service_p);
 	  bootp_client_enable_receive(dhcp->client,
 				      (bootp_receive_func_t *)dhcp_init_reboot, 
 				      service_p, (void *)IFEventID_data_e);
@@ -3004,7 +3019,7 @@ dhcp_init_reboot(ServiceRef service_p, IFEventID_t evid, void * event_data)
 	      my_log(LOG_NOTICE, "DHCP %s: INIT-REBOOT (" IP_FORMAT
 		     ") timed out", if_name(if_p),
 		     IP_LIST(&dhcp->saved.our_ip));
-	      (void)service_remove_address(service_p);
+	      service_remove_address(service_p);
 	      service_publish_failure_sync(service_p, 
 					   ipconfig_status_server_not_responding_e, 
 					   FALSE);
@@ -3640,8 +3655,8 @@ dhcp_arp_router(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	  dhcp->user_warned = FALSE;
 	  
 	  /* set our address */
-	  (void)service_set_address(service_p, dhcp->saved.our_ip, 
-				    mask, G_ip_zeroes);
+	  service_set_address(service_p, dhcp->saved.our_ip,
+			      mask, G_ip_zeroes);
 	  dhcp_publish_success(service_p);
 
 	  /* stop link local if necessary */
@@ -3866,8 +3881,8 @@ dhcp_bound(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 	 != ServiceGetActiveIPAddress(service_p).s_addr)
 	|| (mask.s_addr 
 	    != ServiceGetActiveSubnetMask(service_p).s_addr)) {
-	(void)service_set_address(service_p, dhcp->saved.our_ip, 
-				  mask, G_ip_zeroes);
+	service_set_address(service_p, dhcp->saved.our_ip,
+			    mask, G_ip_zeroes);
     }
     my_log(LOG_NOTICE, "dhcp_bound(%s) %s",
 	   if_name(if_p),
@@ -4028,7 +4043,7 @@ dhcp_decline(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 		     "DHCP %s: DECLINE transmit failed", 
 		     if_name(if_p));
 	  }
-	  (void)service_remove_address(service_p);
+	  service_remove_address(service_p);
 	  dhcp->saved.our_ip.s_addr = 0;
 	  dhcp_invalidate_lease(dhcp);
 	  service_router_clear(service_p);
@@ -4084,7 +4099,7 @@ dhcp_unbound(ServiceRef service_p, IFEventID_t event_id, void * event_data)
 
 	  /* stop using the IP address immediately */
 	  _dhcp_lease_clear(service_p, nak);
-	  (void)service_remove_address(service_p);
+	  service_remove_address(service_p);
 	  dhcp->saved.our_ip.s_addr = 0;
 	  dhcp_invalidate_lease(dhcp);
 	  dhcp->got_nak = FALSE;

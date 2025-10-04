@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2023 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2025 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -378,6 +378,8 @@ S_get_packet(mach_port_t server, int argc, char * argv[])
 	goto done;
     }
     if (status != ipconfig_status_success_e) {
+	fprintf(stderr, "ipconfig_get_packet(%s) failed: %s\n",
+		name, ipconfig_status_string(status));
 	goto done;
     }
     dhcp_packet_print((struct dhcp *)(void *)packet, packet_cnt);
@@ -409,6 +411,8 @@ S_get_v6_packet(mach_port_t server, int argc, char * argv[])
 	goto done;
     }
     if (status != ipconfig_status_success_e) {
+	fprintf(stderr, "ipconfig_get_v6_packet(%s) failed: %s\n",
+		name, ipconfig_status_string(status));
 	goto done;
     }
     DHCPv6PacketFPrint(stdout, (DHCPv6PacketRef)packet, packet_cnt);
@@ -446,6 +450,8 @@ S_get_ra(mach_port_t server, int argc, char * argv[])
 	goto done;
     }
     if (status != ipconfig_status_success_e) {
+	fprintf(stderr, "ipconfig_get_ra(%s) failed: %s\n",
+		name, ipconfig_status_string(status));
 	goto done;
     }
     dict = my_CFPropertyListCreateWithBytePtrAndLength(ra_data, ra_data_cnt);
@@ -518,11 +524,9 @@ S_get_summary(mach_port_t server, int argc, char * argv[])
 		name, ipconfig_status_string(status));
 	goto done;
     }
-    else {
-	ret = 0;
-	if (summary != NULL) {
+    ret = 0;
+    if (summary != NULL) {
 	    SCPrint(TRUE, stdout, CFSTR("%@\n"), summary);
-	}
     }
  done:
     my_CFRelease(&summary);
@@ -637,7 +641,6 @@ S_get_dhcp_ia_id(mach_port_t server, int argc, char * argv[])
  done:
     return (1);
 }
-
 
 #ifndef kSCValNetIPv6ConfigMethodLinkLocal
 static const CFStringRef kIPConfigurationIPv6ConfigMethodLinkLocal = CFSTR("LinkLocal");
@@ -1400,6 +1403,11 @@ S_get_dhcp_duid_type(mach_port_t server, int argc, char * argv[])
 extern Boolean
 IPConfigurationForgetNetwork(CFStringRef ifname, CFStringRef ssid)
 __attribute__((weak_import));
+
+extern CFStringRef
+IPConfigurationCopyIPv4RouterInformation(CFStringRef ifname,
+					 CFStringRef * ret_ip)
+__attribute__((weak_import));
 #endif /* TARGET_OS_OSX */
 
 static int
@@ -1428,9 +1436,8 @@ S_forget_network(mach_port_t server, int argc, char * argv[])
     return (0);
 }
 
-#if TARGET_OS_OSX
 static int
-S_set_hide_BSSID(mach_port_t server, int argc, char * argv[])
+S_set_hide_wifi_info(mach_port_t server, int argc, char * argv[])
 {
     char *		arg = argv[0];
     int			enable;
@@ -1438,9 +1445,9 @@ S_set_hide_BSSID(mach_port_t server, int argc, char * argv[])
 
     errno = 0;
     if (strcasecmp(arg, "default") == 0) {
-	success = IPConfigurationControlPrefsSetHideBSSIDDefault();
+	success = IPConfigurationControlPrefsSetHideWiFiInfoDefault();
 	if (!success) {
-	    fprintf(stderr, "failed to set hide BSSID\n");
+	    fprintf(stderr, "failed to set hide WiFi info\n");
 	}
     }
     else {
@@ -1450,14 +1457,40 @@ S_set_hide_BSSID(mach_port_t server, int argc, char * argv[])
 		    "conversion to integer of %s failed\n", arg);
 	    return (1);
 	}
-	success = IPConfigurationControlPrefsSetHideBSSID(enable != 0);
+	success = IPConfigurationControlPrefsSetHideWiFiInfo(enable != 0);
 	if (!success) {
-	    fprintf(stderr, "failed to set hide BSSID\n");
+	    fprintf(stderr, "failed to set hide WiFi info\n");
 	}
     }
     return (success ? 0 : 1);
 }
-#endif
+
+static int
+S_get_ipv4_router_info(mach_port_t server, int argc, char * argv[])
+{
+    CFStringRef		ifname;
+    CFStringRef		router_ip;
+    CFStringRef		router_mac;
+
+#if TARGET_OS_OSX
+    if (IPConfigurationCopyIPv4RouterInformation == NULL) {
+	fprintf(stderr, "IPConfigurationGetIPv4RouterInformation unavailable\n");
+	return (1);
+    }
+#endif /* TARGET_OS_OSX */
+    ifname = CFStringCreateWithCString(NULL, argv[0], kCFStringEncodingUTF8);
+    router_mac = IPConfigurationCopyIPv4RouterInformation(ifname, &router_ip);
+    my_CFRelease(&ifname);
+    if (router_mac == NULL) {
+	fprintf(stderr, "%s: no IPv4 router information\n", argv[0]);
+	return (1);
+    }
+    SCPrint(TRUE, stdout,
+	    CFSTR("IPv4 router MAC %@ IP %@\n"), router_mac, router_ip);
+    my_CFRelease(&router_mac);
+    my_CFRelease(&router_ip);
+    return (0);
+}
 
 static const struct command_info {
     const char *command;
@@ -1521,9 +1554,8 @@ static const struct command_info {
     { "setdhcpduidtype", S_set_dhcp_duid_type, 0, "[ ll | llt | uuid ]", 0, 1 },
     { "getdhcpduidtype", S_get_dhcp_duid_type, 0, NULL, 0, 1 },
     { "forgetNetwork", S_forget_network, 2, "<interface name> <ssid>", 0, 0},
-#if TARGET_OS_OSX
-    { "setHideBSSID", S_set_hide_BSSID, 1, "0 | 1 | default", 0, 1},
-#endif
+    { "setHideWiFiInfo", S_set_hide_wifi_info, 1, "0 | 1 | default", 0, 1},
+    { "ipv4RouterInfo", S_get_ipv4_router_info, 1, "<interface name>", 0, 1},
     { NULL, NULL, 0, NULL, 0, 0 },
 };
 

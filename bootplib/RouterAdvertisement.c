@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 2010-2025 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -48,6 +48,7 @@
 #include "symbol_scope.h"
 #include "RouterAdvertisement.h"
 #include "DNSNameList.h"
+#include "DNSEncryptedServers.h"
 #include "ptrlist.h"
 #include "cfutil.h"
 #include "util.h"
@@ -102,6 +103,16 @@ pref64_plc_get_prefix_length(pref64_plc_t plc,
 	return valid;
 }
 
+#ifdef TEST_DNSDNRINSTANCE
+struct __RouterAdvertisementTester {
+	struct in6_addr		source_ip;
+	CFStringRef			source_ip_str;
+	CFAbsoluteTime		receive_time;
+	ptrlist_t			options;
+	size_t			ndra_length;
+	uint8_t			ndra_buf[1]; /* variable length */
+}
+#else /* TEST_DNSDNRINSTANCE */
 struct __RouterAdvertisement {
 	CFRuntimeBase	cf_base;
 
@@ -115,6 +126,7 @@ struct __RouterAdvertisement {
 	size_t		ndra_length;
 	uint8_t		ndra_buf[1]; /* variable length */
 };
+#endif /* TEST_DNSDNRINSTANCE */
 
 struct _nd_opt_linkaddr {
 	u_int8_t		nd_opt_linkaddr_type;
@@ -122,30 +134,21 @@ struct _nd_opt_linkaddr {
 	u_int8_t		nd_opt_linkaddr_data[1];
 } __attribute__((__packed__));
 
-#ifndef ND_OPT_PVD
-#define ND_OPT_PVD                    21      /* RFC 8801 */
-#endif /* ND_OPT_PVD */
+#ifndef ND_OPT_DNR
 
-#ifndef ND_OPT_PVD_MIN_LENGTH
-struct nd_opt_pvd {
-    u_int8_t        nd_opt_pvd_type;
-    u_int8_t        nd_opt_pvd_len;
-    /* http:		1 bit */
-    /* legacy:		1 bit */
-    /* ra:		1 bit */
-    /* reserved:	9 bits */
-    /* delay:		4 bits */
-    u_int8_t        nd_opt_flags_delay[2];
-    u_int16_t       nd_opt_pvd_seq;
-    u_int8_t        nd_opt_pvd_id[1];
+struct nd_opt_dnr {
+	u_int8_t	nd_opt_dnr_type;
+	u_int8_t	nd_opt_dnr_len;
+	u_int8_t	nd_opt_dnr_svc_priority[2];
+	u_int8_t	nd_opt_dnr_lifetime[4];
+	u_int8_t	nd_opt_dnr_adn_len[2];
+	u_int8_t        nd_opt_dnr_continuation[1];
 } __attribute__((__packed__));
 
-#define ND_OPT_PVD_MIN_LENGTH  offsetof(struct nd_opt_pvd, nd_opt_pvd_id)
-#define ND_OPT_PVD_FLAGS_HTTP          0x80
-#define ND_OPT_PVD_FLAGS_LEGACY        0x40
-#define ND_OPT_PVD_FLAGS_RA            0x20
-#define ND_OPT_PVD_DELAY_MASK          0x0f
-#endif /* ND_OPT_PVD_MIN_LENGTH */
+#define ND_OPT_DNR 144 /* RFC 9463 */
+#define ND_OPT_DNR_MIN_LENGTH offsetof(struct nd_opt_dnr, nd_opt_dnr_continuation)
+
+#endif /* ND_OPT_DNR */
 
 #define ND_OPT_PREFIX_INFORMATION_LENGTH sizeof(struct nd_opt_prefix_info)
 
@@ -163,6 +166,23 @@ struct nd_opt_pvd {
 						 nd_opt_dnssl_domains)
 
 #define ND_OPT_CAPPORT_HEADER_LENGTH	sizeof(struct nd_opt_hdr)
+
+/*
+ * ref: RFC 5175
+ */
+#ifndef ND_OPT_FLAGS_EXTENSION
+#define ND_OPT_FLAGS_EXTENSION			26
+#define ND_OPT_FLAGS_EXTENSION_MIN_LENGTH	8
+
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_MANAGED					0x0001
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_OTHER					0x0002
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_MOBILE_HOME_AGENT			0x0004
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_ROUTER_SELECTION_PREFERENCES_BIT0	0x0008
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_ROUTER_SELECTION_PREFERENCES_BIT1	0x0010
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_PROXY					0x0020
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_RESERVED_START				0x00c0
+#define ND_OPT_FLAGS_EXTENSION_BITMASK_RESERVED_CONT				0xffffffff
+#endif
 
 STATIC void
 RouterAdvertisementAppendDescription(RouterAdvertisementRef ra,
@@ -268,7 +288,12 @@ __RouterAdvertisementAllocate(CFAllocatorRef allocator, size_t ndra_length)
 /**
  ** Utilities
  **/
-STATIC bool
+#ifdef TEST_DNSDNRINSTANCE
+PRIVATE_EXTERN
+#else
+STATIC
+#endif
+bool
 parse_nd_options(ptrlist_t * options_p, const char * buf, int len)
 {
 	int				left = len;
@@ -322,6 +347,9 @@ S_nd_opt_name(int nd_opt)
 	case ND_OPT_DNSSL:
 		str = "dnssl";
 		break;
+	case ND_OPT_DNR:
+		str = "dnr";
+		break;
 	case ND_OPT_CAPTIVE_PORTAL:
 		str = "captive portal";
 		break;
@@ -330,6 +358,9 @@ S_nd_opt_name(int nd_opt)
 		break;
 	case ND_OPT_PVD:
 		str = "provisioning domain";
+		break;
+	case ND_OPT_FLAGS_EXTENSION:
+		str = "flags extension";
 		break;
 	default:
 		str = "<unknown>";
@@ -471,6 +502,52 @@ find_dnssl(ptrlist_t * options_p, int * domains_length_p, uint32_t * lifetime_p)
 	return (domains);
 }
 
+#ifdef TEST_DNSDNRINSTANCE
+PRIVATE_EXTERN
+#else
+STATIC
+#endif
+const uint8_t *
+find_dnr_option(ptrlist_t * options_p, uint8_t * dnr_data_len_p,
+		uint32_t * lifetime_p, int * start_index)
+{
+	int 			i = 0;
+	int 			count = 0;
+	const uint8_t *		dnr_data = NULL;
+
+	if (start_index != NULL) {
+		i = *start_index;
+	}
+	count = ptrlist_count(options_p);
+	for (; i < count; i++) {
+		const struct nd_opt_hdr *opt = NULL;
+		const struct nd_opt_dnr *dnr_opt = NULL;
+		uint8_t opt_len = 0;
+
+		opt = (const struct nd_opt_hdr *)ptrlist_element(options_p, i);
+		if (opt->nd_opt_type != ND_OPT_DNR) {
+			continue;
+		}
+		dnr_opt = (const struct nd_opt_dnr *)opt;
+		opt_len = dnr_opt->nd_opt_dnr_len * ND_OPT_ALIGN;
+		if (opt_len < ND_OPT_DNR_MIN_LENGTH) {
+			break;
+		}
+		*lifetime_p = net_uint32_get(dnr_opt->nd_opt_dnr_lifetime);
+		/* dnr instance starts at svc priority */
+		dnr_data = (const uint8_t *)&dnr_opt->nd_opt_dnr_svc_priority;
+		/* subtracts the nd opt hdr len */
+		*dnr_data_len_p = ND_OPT_ALIGN * dnr_opt->nd_opt_dnr_len
+		- offsetof(struct nd_opt_dnr, nd_opt_dnr_svc_priority);
+		if (start_index != NULL) {
+			*start_index = ++i;
+		}
+		break;
+	}
+
+	return dnr_data;
+}
+
 STATIC const uint8_t *
 get_pvd_option(const struct nd_opt_hdr * opt, size_t * pvd_id_length,
 	       uint16_t * sequence, RA_PvDFlagsDelayRef flags)
@@ -523,16 +600,15 @@ find_pvd_options(ptrlist_t * options_p, size_t * pvd_id_length,
 }
 
 STATIC const CFArrayRef
-copy_prefixes_array(ptrlist_t * options_p)
+copy_prefixes_array(ptrlist_t * options_p, CFArrayRef *ret_prefix_lengths)
 {
     CFMutableArrayRef prefixes = NULL;
+    CFMutableArrayRef prefix_lengths = NULL;
     bool success = false;
 
     for (int i = 0; i < ptrlist_count(options_p); i++) {
 	const struct nd_opt_prefix_info *pio = NULL;
 	uint8_t opt_len = 0;
-	char ntopbuf[INET6_ADDRSTRLEN];
-	const char *ntop_ret = NULL;
 	CFStringRef prefix_str = NULL;
 
 	pio = (const struct nd_opt_prefix_info *)ptrlist_element(options_p, i);
@@ -546,36 +622,37 @@ copy_prefixes_array(ptrlist_t * options_p)
 	    goto done;
 	}
 	if (prefixes == NULL) {
-	    prefixes = CFArrayCreateMutable(NULL,
-					    1,
+	    prefixes = CFArrayCreateMutable(NULL, 0,
 					    &kCFTypeArrayCallBacks);
-	    if (prefixes == NULL) {
-		goto done;
+	    if (ret_prefix_lengths != NULL) {
+		    prefix_lengths
+			    = CFArrayCreateMutable(NULL, 0,
+						   &kCFTypeArrayCallBacks);
 	    }
 	}
-	ntop_ret = inet_ntop(AF_INET6,
-			     &pio->nd_opt_pi_prefix,
-			     ntopbuf,
-			     sizeof(ntopbuf));
-	if (ntop_ret == NULL) {
-	    goto done;
-	}
-	prefix_str = CFStringCreateWithCString(NULL,
-					       ntop_ret,
-					       kCFStringEncodingUTF8);
-	if (prefix_str == NULL) {
-	    goto done;
-	}
+	prefix_str = my_CFStringCreateWithIPv6Address(&pio->nd_opt_pi_prefix);
 	CFArrayAppendValue(prefixes, prefix_str);
 	my_CFRelease(&prefix_str);
+	if (prefix_lengths != NULL) {
+		CFNumberRef	num;
+		int		prefix_length = pio->nd_opt_pi_prefix_len;
+
+		num = CFNumberCreate(NULL, kCFNumberIntType, &prefix_length);
+		CFArrayAppendValue(prefix_lengths, num);
+		CFRelease(num);
+	}
     }
     success = true;
 
 done:
     if (!success) {
 	my_CFRelease(&prefixes);
+	my_CFRelease(&prefix_lengths);
     }
-    return (CFArrayRef)prefixes;
+    else if (ret_prefix_lengths != NULL) {
+	    *ret_prefix_lengths = prefix_lengths;
+    }
+    return prefixes;
 }
 
 STATIC const uint8_t *
@@ -830,6 +907,103 @@ AppendDNSSLOptionDescription(CFMutableStringRef str,
 }
 
 STATIC void
+AppendDNSDNROptionDescription(CFMutableStringRef str,
+			      const struct nd_opt_hdr * opt,
+			      int opt_len)
+{
+	CFMutableStringRef		temp_str = NULL;
+	const struct nd_opt_dnr * 	dnr = { 0 };
+	uint32_t 			lifetime = 0;
+	CFStringRef 			adn_str = NULL;
+	uint16_t 			adn_len = 0;
+	uint16_t 			svc_priority = 0;
+	uint16_t 			addr_len = 0;
+	char 				ntopbuf[INET6_ADDRSTRLEN] = { 0 };
+	uint16_t 			params_len = 0;
+	int 				offset = 0;
+	int				bytes_left = 0;
+	bool				success = FALSE;
+
+	if (opt_len < ND_OPT_DNR_MIN_LENGTH) {
+		goto done;
+	}
+	bytes_left = opt_len;
+	dnr = (const struct nd_opt_dnr *)opt;
+	bytes_left -= 2 * sizeof(uint8_t); // type and len
+	lifetime = net_uint32_get(dnr->nd_opt_dnr_lifetime);
+	bytes_left -= sizeof(lifetime);
+	temp_str = CFStringCreateMutable(NULL, 0);
+	STRING_APPEND_STR(temp_str, " lifetime ");
+	if (lifetime == RA_OPT_INFINITE_LIFETIME) {
+		STRING_APPEND_STR(temp_str, "infinite");
+	}
+	else {
+		STRING_APPEND(temp_str, "%u", lifetime);
+	}
+	STRING_APPEND_STR(temp_str, ", priority ");
+	svc_priority = net_uint16_get(dnr->nd_opt_dnr_svc_priority);
+	bytes_left -= sizeof(svc_priority);
+	STRING_APPEND(temp_str, "%hu", svc_priority);
+	STRING_APPEND_STR(temp_str, ", authentication domain name: ");
+	adn_len = net_uint16_get(dnr->nd_opt_dnr_adn_len);
+	bytes_left -= sizeof(adn_len);
+	if (bytes_left < adn_len) {
+		STRING_APPEND_STR(temp_str, "<truncated>");
+		goto done;
+	}
+	adn_str = DNSNameStringCreate(dnr->nd_opt_dnr_continuation, adn_len, false);
+	if (adn_str != NULL) {
+		CFStringAppend(temp_str, adn_str);
+		CFRelease(adn_str);
+	}
+	else {
+		STRING_APPEND_STR(temp_str, "(null)");
+	}
+	bytes_left -= adn_len;
+	STRING_APPEND_STR(temp_str, ", addrs: ");
+	offset = adn_len;
+	addr_len = net_uint16_get(dnr->nd_opt_dnr_continuation + offset);
+	offset += sizeof(addr_len);
+	bytes_left -= sizeof(addr_len);
+	if (bytes_left < addr_len
+	    || (addr_len % sizeof(struct in6_addr)) != 0 ) {
+		STRING_APPEND_STR(temp_str, "<truncated>");
+		goto done;
+	}
+	for (int i = 0; i < (addr_len / sizeof(struct in6_addr)); i++) {
+		inet_ntop(AF_INET6,
+			  dnr->nd_opt_dnr_continuation + offset,
+			  ntopbuf,
+			  sizeof(ntopbuf));
+		STRING_APPEND(temp_str, "%s ", ntopbuf);
+		offset += sizeof(struct in6_addr);
+		bytes_left -= sizeof(struct in6_addr);
+	}
+	if (bytes_left < sizeof(params_len)) {
+		STRING_APPEND_STR(temp_str, "<truncated>");
+		goto done;
+	}
+	params_len = net_uint16_get(dnr->nd_opt_dnr_continuation + offset);
+	offset += sizeof(params_len);
+	STRING_APPEND_STR(temp_str, ", service parameters: ");
+	my_CFStringAppendBytesAsHex(temp_str,
+				    (dnr->nd_opt_dnr_continuation + offset),
+				    params_len,
+				    ' ');
+	success = TRUE;
+
+done:
+	if (success) {
+		CFStringAppend(str, temp_str);
+	} else {
+		AppendTruncatedOptionDescription(str, opt, opt_len,
+						 ND_OPT_DNR_MIN_LENGTH);
+	}
+	my_CFRelease(&temp_str);
+	return;
+}
+
+STATIC void
 AppendPrefixInformationOptionDescription(CFMutableStringRef str,
 					 const struct nd_opt_hdr * opt,
 					 int opt_len)
@@ -1035,7 +1209,7 @@ AppendPvDOptionDescription(CFMutableStringRef str,
 		STRING_APPEND_STR(str, "invalid id");
 		goto done;
 	}
-	pvdid = DNSNameStringCreate(pvdid_bytes, pvdid_bytes_len);
+	pvdid = DNSNameStringCreate(pvdid_bytes, pvdid_bytes_len, false);
 	if (pvdid == NULL) {
 		STRING_APPEND_STR(str, "invalid id");
 		goto done;
@@ -1057,6 +1231,53 @@ AppendPvDOptionDescription(CFMutableStringRef str,
 
 done:
 	my_CFRelease(&pvdid);
+	return;
+}
+
+STATIC void
+AppendFlagsExtensionOptionDescription(CFMutableStringRef str,
+				      const struct nd_opt_hdr * opt,
+				      int opt_len)
+{
+	uint8_t *	scan = NULL;
+	uint16_t	flags_start = 0;
+	uint32_t	flags_continued = 0;
+
+	if (opt_len < ND_OPT_FLAGS_EXTENSION_MIN_LENGTH) {
+		AppendTruncatedOptionDescription(str, opt, opt_len,
+						 ND_OPT_FLAGS_EXTENSION_MIN_LENGTH);
+		goto done;
+	}
+	STRING_APPEND_STR(str, " flags [ ");
+	scan = (uint8_t *)opt + sizeof(*opt);
+	flags_start = net_uint16_get(scan);
+	scan += sizeof(flags_start);
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_MANAGED) != 0) {
+		STRING_APPEND_STR(str, "managed ");
+	}
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_OTHER) != 0) {
+		STRING_APPEND_STR(str, "other ");
+	}
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_MOBILE_HOME_AGENT) != 0) {
+		STRING_APPEND_STR(str, "mobile_ipv6_home_agent ");
+	}
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_ROUTER_SELECTION_PREFERENCES_BIT0) != 0) {
+		STRING_APPEND_STR(str, "router_selection_preferences0 ");
+	}
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_ROUTER_SELECTION_PREFERENCES_BIT1) != 0) {
+		STRING_APPEND_STR(str, "router_selection_preferences1 ");
+	}
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_PROXY) != 0) {
+		STRING_APPEND_STR(str, "proxy ");
+	}
+	flags_continued = net_uint32_get(scan);
+	if ((flags_start & ND_OPT_FLAGS_EXTENSION_BITMASK_RESERVED_START) != 0
+	    || (flags_continued & ND_OPT_FLAGS_EXTENSION_BITMASK_RESERVED_CONT) != 0) {
+		STRING_APPEND_STR(str, "reserved ");
+	}
+	STRING_APPEND_STR(str, "]");
+
+done:
 	return;
 }
 
@@ -1090,6 +1311,9 @@ AppendOptionDescriptions(CFMutableStringRef str, ptrlist_t * options_p)
 		case ND_OPT_DNSSL:
 			AppendDNSSLOptionDescription(str, opt, opt_len);
 			break;
+		case ND_OPT_DNR:
+			AppendDNSDNROptionDescription(str, opt, opt_len);
+			break;
 		case ND_OPT_PREFIX_INFORMATION:
 			AppendPrefixInformationOptionDescription(str, opt,
 								 opt_len);
@@ -1106,6 +1330,9 @@ AppendOptionDescriptions(CFMutableStringRef str, ptrlist_t * options_p)
 			break;
 		case ND_OPT_PVD:
 			AppendPvDOptionDescription(str, opt, opt_len);
+			break;
+		case ND_OPT_FLAGS_EXTENSION:
+			AppendFlagsExtensionOptionDescription(str, opt, opt_len);
 			break;
 		case ND_OPT_TARGET_LINKADDR:
 		case ND_OPT_SOURCE_LINKADDR:
@@ -1283,9 +1510,10 @@ RouterAdvertisementGetSourceLinkAddress(RouterAdvertisementRef ra,
 }
 
 PRIVATE_EXTERN CFArrayRef
-RouterAdvertisementCopyPrefixes(RouterAdvertisementRef ra)
+RouterAdvertisementCopyPrefixes(RouterAdvertisementRef ra,
+				CFArrayRef * lengths)
 {
-    return (copy_prefixes_array(&ra->options));
+	return (copy_prefixes_array(&ra->options, lengths));
 }
 
 PRIVATE_EXTERN uint32_t
@@ -1309,6 +1537,68 @@ RouterAdvertisementGetDNSSL(RouterAdvertisementRef ra,
 			    uint32_t * lifetime_p)
 {
 	return (find_dnssl(&ra->options, domains_length_p, lifetime_p));
+}
+
+PRIVATE_EXTERN CFArrayRef
+RouterAdvertisementCopyAllDNSEncryptedServers(RouterAdvertisementRef ra)
+{
+	CFMutableArrayRef 	server_entries = NULL;
+	const uint8_t * 	dnr_data = NULL;
+	uint8_t 		dnr_data_len = 0;
+	int 			option_count = 0;
+	int 			optlist_i = 0;
+	bool 			success = FALSE;
+
+	option_count = ptrlist_count(&ra->options);
+	while (optlist_i < option_count) {
+		CFDictionaryRef encrypted_server = NULL;
+		uint32_t lifetime = 0;
+		CFAbsoluteTime now = 0;
+
+		success = FALSE;
+		dnr_data = find_dnr_option(&ra->options,
+					   &dnr_data_len,
+					   &lifetime,
+					   &optlist_i);
+		if (dnr_data == NULL || dnr_data_len <= 0) {
+			break;
+		}
+#ifndef TEST_DNSDNRINSTANCE
+		now = CFAbsoluteTimeGetCurrent();
+		if (RouterAdvertisementLifetimeHasExpired(ra, now, lifetime)) {
+			break;
+		}
+#endif /* TEST_DNSDNRINSTANCE */
+		encrypted_server =
+		DNSEncryptedServerEntryCreateWithRAData(dnr_data, dnr_data_len);
+		if (encrypted_server == NULL) {
+			break;
+		}
+		if (server_entries == NULL) {
+			server_entries =
+			CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+		}
+		/* filters out dupes */
+		DNSEncryptedServerListAppendUniqueEntry(server_entries,
+							encrypted_server);
+		CFRelease(encrypted_server);
+		success = TRUE;
+	}
+	if (!success) {
+		/* ignores all DNR instances if any failed parsing */
+		goto done;
+	}
+	/* servers are sorted by their stated service priority */
+	CFArraySortValues(server_entries,
+			  CFRangeMake(0, CFArrayGetCount(server_entries)),
+			  DNSEncryptedServerListSortByServicePriority,
+			  NULL);
+
+done:
+	if (!success) {
+		my_CFRelease(&server_entries);
+	}
+	return (CFArrayRef)server_entries;
 }
 
 PRIVATE_EXTERN const uint8_t *

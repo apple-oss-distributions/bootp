@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2021 Apple Inc. All rights reserved.
+ * Copyright (c) 2003-2025 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -171,6 +171,10 @@ my_CFDictionarySetUInt64(CFMutableDictionaryRef dict, CFStringRef prop,
 void
 my_CFArrayAppendUniqueValue(CFMutableArrayRef arr, CFTypeRef new);
 
+void
+my_CFMutableArrayMergeArray(CFMutableArrayRef merge, CFArrayRef list,
+			    CFComparatorFunction cfdict_comparator);
+
 CFStringRef
 my_CFStringCopyComponent(CFStringRef path, CFStringRef separator, 
 			 CFIndex component_index);
@@ -234,5 +238,8 @@ my_CFPropertyListCreateVMData(CFPropertyListRef plist,
 			      mach_msg_type_number_t * 	ret_data_len);
 CFPropertyListRef
 my_CFPropertyListCreateWithBytePtrAndLength(const void * data, int data_len);
+
+CFStringRef
+myCopyDHCPSafeHostName(CFStringRef name, unsigned int max_length);
 
 #endif /* _S_CFUTIL_H */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 2000-2025 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -51,6 +51,7 @@
 #include "symbol_scope.h"
 
 #define kNetworkSignature	CFSTR("NetworkSignature")
+#define kNetworkSignatureHash	CFSTR("NetworkSignatureHash")
 
 typedef enum {
     IFEventID_start_e = 0,		/* start the configuration method */
@@ -128,7 +129,8 @@ ip_valid(struct in_addr ip)
 extern void *
 find_option_with_length(dhcpol_t * options, dhcptag_t tag, int min_length);
 
-extern char *	computer_name();
+extern char *	get_dhcp_hostname(void);
+extern char *	get_dns_hostname(void);
 
 void
 linklocal_service_change(ServiceRef parent_service_p, boolean_t allocate);
@@ -241,17 +243,17 @@ service_is_address_set(ServiceRef service_p);
 ServiceRef
 service_parent_service(ServiceRef service_p);
 
-int
+void
 service_enable_autoaddr(ServiceRef service_p);
 
-int
+void
 service_disable_autoaddr(ServiceRef service_p);
 
-int
+void
 service_set_address(ServiceRef service_p, struct in_addr ip, 
 		    struct in_addr mask, struct in_addr  broadcast);
 
-int
+void
 service_remove_address(ServiceRef service_p);
 
 boolean_t
@@ -279,9 +281,10 @@ boolean_t
 ServiceIsPublished(ServiceRef service_p);
 
 void
-ServiceSetRequestedIPv6Address(ServiceRef service_p,
-			       const struct in6_addr * addr_p,
-			       int prefix_length);
+ServiceSetRequestedIPv6Information(ServiceRef service_p,
+				   const struct in6_addr * addr_p,
+				   int prefix_length,
+				   const struct in6_addr * router_p);
 void
 ServiceGetRequestedIPv6Address(ServiceRef service_p, 
 			       struct in6_addr * addr_p,

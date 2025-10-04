@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2024 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2025 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -41,6 +41,7 @@
 #include <TargetConditionals.h>
 
 typedef struct WiFiInfo *WiFiInfoRef;
+typedef uint32_t WiFiConnectionID;
 
 typedef CF_ENUM(uint32_t, WiFiAuthType) {
 	kWiFiAuthTypeNone 	= 0x0000,
@@ -85,9 +86,10 @@ WiFiInfoCompare(WiFiInfoRef info1, WiFiInfoRef info2);
 bool
 WiFiInfoAllowSharingDeviceType(WiFiInfoRef info);
 
-#if TARGET_OS_OSX
-void
-WiFiInfoSetHideBSSID(bool hide);
-#endif /* TARGET_OS_OSX */
+WiFiConnectionID
+WiFiInfoGetConnectionID(WiFiInfoRef w);
+
+bool
+WiFiAcknowledgeConnectionID(CFStringRef ifname, WiFiConnectionID cid);
 
 #endif /* _S_WIRELESS_H */
